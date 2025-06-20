@@ -669,6 +669,38 @@ inline std::unordered_map<std::string, std::string> getDeviceIDMap() {
     return DeviceManager::getInstance().getDeviceIDMap();
 }
 
+// IDベース送信クラス
+class ID {
+public:
+    // 静的メソッド: IDを指定してメッセージ送信
+    static bool send(const std::string& device_id, const std::string& message) {
+        return DeviceManager::getInstance().sendByID(device_id, message);
+    }
+    
+    // 複数のIDに同じメッセージを送信
+    static void sendToMultiple(const std::vector<std::string>& device_ids, const std::string& message) {
+        auto& manager = DeviceManager::getInstance();
+        for (const auto& id : device_ids) {
+            if (manager.sendByID(id, message)) {
+                RCLCPP_INFO(rclcpp::get_logger("ID"), "Sent '%s' to device ID: %s", 
+                           message.c_str(), id.c_str());
+            } else {
+                RCLCPP_ERROR(rclcpp::get_logger("ID"), "Failed to send to device ID: %s", id.c_str());
+            }
+        }
+    }
+    
+    // 利用可能なデバイスIDのリストを取得
+    static std::vector<std::string> getAvailableIDs() {
+        auto device_map = DeviceManager::getInstance().getDeviceIDMap();
+        std::vector<std::string> ids;
+        for (const auto& pair : device_map) {
+            ids.push_back(pair.first);
+        }
+        return ids;
+    }
+};
+
 } // namespace SearchID
 
 #endif // SERCHID_HPP

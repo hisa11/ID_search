@@ -7,6 +7,30 @@
 #include <rclcpp/rclcpp.hpp>
 #include <unordered_map>
 
+/*
+使用例:
+1. 個別送信:
+   SearchID::ID::send("nucleo1", "asagohan");
+   SearchID::ID::send("nucleo2", "bangohan");
+
+2. 複数デバイスに同じメッセージ:
+   std::vector<std::string> devices = {"nucleo1", "nucleo2"};
+   SearchID::ID::sendToMultiple(devices, "hello");
+
+3. 利用可能なIDを確認:
+   auto ids = SearchID::ID::getAvailableIDs();
+   for (const auto& id : ids) {
+       std::cout << "Device ID: " << id << std::endl;
+   }
+
+4. 戻り値での成功/失敗判定:
+   if (SearchID::ID::send("nucleo1", "test")) {
+       std::cout << "送信成功" << std::endl;
+   } else {
+       std::cout << "送信失敗" << std::endl;
+   }
+*/
+
 int main(int argc, char *argv[])
 {
     rclcpp::init(argc, argv);
@@ -38,8 +62,8 @@ int main(int argc, char *argv[])
     
     // DeviceManagerのstartメソッドを使用してID探索を実行
     RCLCPP_INFO(rclcpp::get_logger("main"), "Starting device ID discovery...");
-    manager.start(1000);  // 1秒のタイムアウト
-    
+    manager.start(500);  // 500msのタイムアウト
+
     // ID応答を待機
     RCLCPP_INFO(rclcpp::get_logger("main"), "Waiting for ID responses...");
     
@@ -58,28 +82,39 @@ int main(int argc, char *argv[])
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
 
-    // IDに対応したメッセージを送信
+    // IDに対応したメッセージを送信（新しいAPIを使用）
     RCLCPP_INFO(rclcpp::get_logger("main"), "Sending messages based on IDs...");
     
+    // 利用可能なIDを取得
+    auto available_ids = SearchID::ID::getAvailableIDs();
+    RCLCPP_INFO(rclcpp::get_logger("main"), "Available device IDs: %zu devices", available_ids.size());
+    
+    // 個別送信の例
+    SearchID::ID::send("nucleo1", "asagohan");
+    SearchID::ID::send("nucleo2", "bangohan");
+    SearchID::ID::send("nucleo3", "yorugohan");
+    
+    // 複数デバイスに同じメッセージを送信する例
+    std::vector<std::string> target_devices = {"nucleo1", "nucleo2"};
+    SearchID::ID::sendToMultiple(target_devices, "ohayou");
+    
+    // フォールバック: 既存のループによる送信（利用可能なIDのみ）
     auto device_id_map = manager.getDeviceIDMap();
     for (const auto& id_pair : device_id_map) {
         std::string device_id = id_pair.first;
         
         std::string message;
-        if (device_id == "nucleo1") {
-            message = "asagohan";
-        } else if (device_id == "nucleo2") {
-            message = "bangohan";
-        } else {
+        if (device_id == "nucleo4") {
+            message = "oyasumi";
+        } else if (device_id.find("unknown") != std::string::npos) {
             message = "hello_" + device_id;
         }
         
-        if (manager.sendByID(device_id, message)) {
-            RCLCPP_INFO(rclcpp::get_logger("main"), "Sent '%s' to device ID: %s", 
-                       message.c_str(), device_id.c_str());
-        } else {
-            RCLCPP_ERROR(rclcpp::get_logger("main"), "Failed to send to device ID: %s", 
-                        device_id.c_str());
+        if (!message.empty()) {
+            if (SearchID::ID::send(device_id, message)) {
+                RCLCPP_INFO(rclcpp::get_logger("main"), "Fallback sent '%s' to device ID: %s", 
+                           message.c_str(), device_id.c_str());
+            }
         }
     }
 
