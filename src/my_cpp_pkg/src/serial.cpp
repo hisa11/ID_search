@@ -221,3 +221,37 @@ std::vector<std::string> SerialCommunication::extract_messages() {
 bool SerialCommunication::isOpen() const {
     return serial_fd_ >= 0;
 }
+
+// 静的メソッド: 指定されたポートリストからデバイスをスキャンして接続
+std::vector<std::shared_ptr<SerialCommunication>> SerialCommunication::scanAndConnectDevices(
+    const std::vector<std::string>& ports,
+    speed_t baudrate,
+    const std::string& delimiter
+) {
+    std::vector<std::shared_ptr<SerialCommunication>> connected_devices;
+    
+    RCLCPP_INFO(rclcpp::get_logger("SerialCommunication"), "Scanning for serial devices...");
+    
+    // シリアルデバイスを接続
+    for (const auto& port : ports) {
+        RCLCPP_INFO(rclcpp::get_logger("SerialCommunication"), "Trying to connect to %s", port.c_str());
+        
+        std::string node_name = "device" + std::to_string(connected_devices.size()) + "_node";
+        auto device = std::make_shared<SerialCommunication>(node_name, port, baudrate, delimiter);
+            
+        if (device->initialize()) {
+            RCLCPP_INFO(rclcpp::get_logger("SerialCommunication"), "Successfully connected to %s", port.c_str());
+            connected_devices.push_back(device);
+        } else {
+            RCLCPP_WARN(rclcpp::get_logger("SerialCommunication"), "Failed to connect to %s", port.c_str());
+        }
+    }
+
+    if (connected_devices.empty()) {
+        RCLCPP_ERROR(rclcpp::get_logger("SerialCommunication"), "No devices connected");
+    } else {
+        RCLCPP_INFO(rclcpp::get_logger("SerialCommunication"), "Connected %zu device(s)", connected_devices.size());
+    }
+    
+    return connected_devices;
+}

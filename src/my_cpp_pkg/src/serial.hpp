@@ -9,6 +9,7 @@
 #include <cstring>
 #include <vector>
 #include <functional>
+#include <memory>
 
 class SerialCommunication : public rclcpp::Node {
 public:
@@ -42,6 +43,13 @@ public:
 
     // ポートの状態を取得
     bool isOpen() const;
+
+    // 静的メソッド: 指定されたポートリストからデバイスをスキャンして接続
+    static std::vector<std::shared_ptr<SerialCommunication>> scanAndConnectDevices(
+        const std::vector<std::string>& ports,
+        speed_t baudrate = B9600,
+        const std::string& delimiter = "|"
+    );
 
 private:
     std::string port_;

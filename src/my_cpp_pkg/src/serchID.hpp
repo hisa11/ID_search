@@ -49,6 +49,16 @@ public:
                    "Device registered: %s", device_name.c_str());
     }
 
+    // 複数のデバイスを一括登録
+    void registerDevices(const std::vector<std::shared_ptr<SerialCommunication>>& devices) {
+        for (size_t i = 0; i < devices.size(); ++i) {
+            std::string device_name = "device" + std::to_string(i);
+            registerDevice(device_name, devices[i]);
+        }
+        RCLCPP_INFO(rclcpp::get_logger("DeviceManager"), 
+                   "Registered %zu devices", devices.size());
+    }
+
     // デバイス名でデバイスを取得
     std::shared_ptr<SerialCommunication> getDevice(const std::string& device_name) {
         auto it = devices_.find(device_name);
@@ -587,6 +597,11 @@ inline std::shared_ptr<SerialCommunication> createAndRegisterDevice(
                     "Failed to initialize device: %s", device_name.c_str());
         return nullptr;
     }
+}
+
+// ヘルパー関数: 複数デバイスの一括登録
+inline void registerDevices(const std::vector<std::shared_ptr<SerialCommunication>>& devices) {
+    DeviceManager::getInstance().registerDevices(devices);
 }
 
 // ヘルパー関数: デバイス名で送信
