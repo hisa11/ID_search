@@ -671,6 +671,10 @@ inline std::unordered_map<std::string, std::string> getDeviceIDMap() {
 
 // IDベース送信クラス
 class ID {
+private:
+    static std::unordered_map<std::string, std::chrono::steady_clock::time_point> pending_responses_;
+    static std::unordered_map<std::string, int> pending_random_nums_;
+    
 public:
     // 既存: IDを指定してメッセージ送信
     static bool send(const std::string& device_id, const std::string& message) {
@@ -682,7 +686,7 @@ public:
     template<typename... Args>
     static bool send(const std::string& device_id, Args&&... args) {
         std::vector<std::string> data = { std::forward<Args>(args)... };
-        int random_num = std::rand() & 0xFF; // 2バイト(0〜65535)の範囲に制限
+        int random_num = std::rand() & 0xFFFF; // 16bit範囲に制限
         std::string pc_name = DeviceManager::getInstance().getDeviceName();
         if (pc_name.empty()) pc_name = "PC1";
         std::stringstream ss;
@@ -702,6 +706,12 @@ public:
             RCLCPP_ERROR(rclcpp::get_logger("ID"), "Device not open: %s", dev_name.c_str());
             return false;
         }
+        
+        // レスポンス待機状態を記録
+        std::string response_key = device_id + "_" + std::to_string(random_num);
+        pending_responses_[response_key] = std::chrono::steady_clock::now();
+        pending_random_nums_[response_key] = random_num;
+        
         device->setReceiveCallback([device_id, random_num](const std::string& resp) {
             auto parts = splitString(resp, ',');
             if (parts.size() >= 4 && parts[0] == "102" && parts[1] == device_id) {
@@ -711,10 +721,46 @@ public:
                     std::string status = parts[3];
                     RCLCPP_INFO(rclcpp::get_logger("ID"), "Response from %s: status=%s", device_id.c_str(), status.c_str());
                     std::cout << "[ID] Response from " << device_id << ": status=" << status << std::endl;
+                    
+                    // レスポンス受信をマーク
+                    std::string response_key = device_id + "_" + std::to_string(random_num);
+                    pending_responses_.erase(response_key);
+                    pending_random_nums_.erase(response_key);
                 }
             }
         });
+        
         return device->sendRaw(msg);
+    }
+    
+    // レスポンスタイムアウトチェック（定期的に呼び出す）
+    static void checkTimeouts(int timeout_ms = 2000) {
+        auto now = std::chrono::steady_clock::now();
+        std::vector<std::string> timed_out_keys;
+        
+        for (const auto& pair : pending_responses_) {
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - pair.second).count();
+            if (elapsed > timeout_ms) {
+                timed_out_keys.push_back(pair.first);
+            }
+        }
+        
+        for (const auto& key : timed_out_keys) {
+            // デバイスIDを抽出
+            size_t underscore_pos = key.find_last_of('_');
+            if (underscore_pos != std::string::npos) {
+                std::string device_id = key.substr(0, underscore_pos);
+                int random_num = pending_random_nums_[key];
+                
+                RCLCPP_ERROR(rclcpp::get_logger("ID"), "Response timeout for device %s (random: %d)", 
+                            device_id.c_str(), random_num);
+                std::cout << "[ERROR] Response timeout for device " << device_id 
+                         << " (random: " << random_num << ")" << std::endl;
+            }
+            
+            pending_responses_.erase(key);
+            pending_random_nums_.erase(key);
+        }
     }
     
     // 複数のIDに同じメッセージを送信
@@ -742,6 +788,10 @@ public:
 };
 
 } // namespace SearchID
+
+// 静的メンバ変数の定義
+std::unordered_map<std::string, std::chrono::steady_clock::time_point> SearchID::ID::pending_responses_;
+std::unordered_map<std::string, int> SearchID::ID::pending_random_nums_;
 
 #endif // SERCHID_HPP
 

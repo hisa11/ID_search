@@ -40,7 +40,7 @@ int main(int argc, char *argv[])
     std::vector<std::shared_ptr<SerialCommunication>> connected_devices;
 
     // SerialCommunicationの静的メソッドを使用してデバイススキャン
-    connected_devices = SerialCommunication::scanAndConnectDevices(ports, B9600, "|");
+    connected_devices = SerialCommunication::scanAndConnectDevices(ports, B115200, "|");
 
     if (connected_devices.empty())
     {
@@ -93,10 +93,13 @@ int main(int argc, char *argv[])
     auto available_ids = SearchID::ID::getAvailableIDs();
     RCLCPP_INFO(rclcpp::get_logger("main"), "Available device IDs: %zu devices", available_ids.size());
 
-    // 個別送信の例
+    // 個別送信の例（ノンブロッキング）
     SearchID::ID::send("nucleo1", "asagohan");
     SearchID::ID::send("nucleo2", "bangohan");
     SearchID::ID::send("nucleo3", "yorugohan");
+
+    // 送信後すぐに次の処理へ進む（レスポンス待機なし）
+    RCLCPP_INFO(rclcpp::get_logger("main"), "Messages sent, continuing with other tasks...");
 
     // 複数デバイスに同じメッセージを送信する例
     std::vector<std::string> target_devices = {"nucleo1", "nucleo2"};
@@ -127,6 +130,23 @@ int main(int argc, char *argv[])
             }
         }
     }
+
+    // バックグラウンドでタイムアウトチェックを実行（メイン処理と並行）
+    RCLCPP_INFO(rclcpp::get_logger("main"), "Running background timeout monitoring...");
+    auto timeout_start_time = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - timeout_start_time < std::chrono::seconds(5)) {
+        // レスポンス受信処理
+        executor.spin_some(std::chrono::milliseconds(1));
+        
+        // タイムアウトチェック（2秒タイムアウト）
+        SearchID::ID::checkTimeouts(2000);
+        
+        // CPUを他の処理に譲る
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    
+    // 最終タイムアウトチェック
+    SearchID::ID::checkTimeouts(2000);
 
     // 送信完了（最高速化）
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
