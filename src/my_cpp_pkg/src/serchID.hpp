@@ -672,9 +672,49 @@ inline std::unordered_map<std::string, std::string> getDeviceIDMap() {
 // IDベース送信クラス
 class ID {
 public:
-    // 静的メソッド: IDを指定してメッセージ送信
+    // 既存: IDを指定してメッセージ送信
     static bool send(const std::string& device_id, const std::string& message) {
         return DeviceManager::getInstance().sendByID(device_id, message);
+    }
+    
+    // 追加: 可変長引数で複数データを非同期送信し、レスポンスをコールバックで受信（送信成功/失敗をboolで返す）
+    // 例: if(SearchID::ID::send("nucleo1", "asagohan", "bangohan")) {...}
+    template<typename... Args>
+    static bool send(const std::string& device_id, Args&&... args) {
+        std::vector<std::string> data = { std::forward<Args>(args)... };
+        int random_num = std::rand() & 0xFF; // 2バイト(0〜65535)の範囲に制限
+        std::string pc_name = DeviceManager::getInstance().getDeviceName();
+        if (pc_name.empty()) pc_name = "PC1";
+        std::stringstream ss;
+        ss << "2," << pc_name << "," << random_num << "," << data.size();
+        for (const auto& d : data) ss << "," << d;
+        ss << "|";
+        std::string msg = ss.str();
+        auto id_map = DeviceManager::getInstance().getDeviceIDMap();
+        auto it = id_map.find(device_id);
+        if (it == id_map.end()) {
+            RCLCPP_ERROR(rclcpp::get_logger("ID"), "Device ID not found: %s", device_id.c_str());
+            return false;
+        }
+        std::string dev_name = it->second;
+        auto device = DeviceManager::getInstance().getDevice(dev_name);
+        if (!device || !device->isOpen()) {
+            RCLCPP_ERROR(rclcpp::get_logger("ID"), "Device not open: %s", dev_name.c_str());
+            return false;
+        }
+        device->setReceiveCallback([device_id, random_num](const std::string& resp) {
+            auto parts = splitString(resp, ',');
+            if (parts.size() >= 4 && parts[0] == "102" && parts[1] == device_id) {
+                int resp_rand = 0;
+                try { resp_rand = std::stoi(parts[2]); } catch (...) {}
+                if (resp_rand == random_num) {
+                    std::string status = parts[3];
+                    RCLCPP_INFO(rclcpp::get_logger("ID"), "Response from %s: status=%s", device_id.c_str(), status.c_str());
+                    std::cout << "[ID] Response from " << device_id << ": status=" << status << std::endl;
+                }
+            }
+        });
+        return device->sendRaw(msg);
     }
     
     // 複数のIDに同じメッセージを送信
