@@ -55,15 +55,6 @@ ament_target_dependencies(searchid_lib
 # カスタムインターフェースとのリンク
 target_link_libraries(searchid_lib "${cpp_typesupport_target}")
 
-add_executable(searchid_example src/searchid_example.cpp)
-target_link_libraries(searchid_example searchid_lib serial_lib)
-ament_target_dependencies(searchid_example
-  rclcpp
-  std_msgs
-  std_srvs
-)
-target_link_libraries(searchid_example "${cpp_typesupport_target}")
-
 add_executable(searchid_simple_example src/searchid_simple_example.cpp)
 target_link_libraries(searchid_simple_example searchid_lib serial_lib)
 ament_target_dependencies(searchid_simple_example
@@ -72,24 +63,6 @@ ament_target_dependencies(searchid_simple_example
   std_srvs
 )
 target_link_libraries(searchid_simple_example "${cpp_typesupport_target}")
-
-add_executable(id_request_example src/id_request_example.cpp)
-target_link_libraries(id_request_example searchid_lib serial_lib)
-ament_target_dependencies(id_request_example
-  rclcpp
-  std_msgs
-  std_srvs
-)
-target_link_libraries(id_request_example "${cpp_typesupport_target}")
-
-add_executable(id_request_timeout_example src/id_request_timeout_example.cpp)
-target_link_libraries(id_request_timeout_example searchid_lib serial_lib)
-ament_target_dependencies(id_request_timeout_example
-  rclcpp
-  std_msgs
-  std_srvs
-)
-target_link_libraries(id_request_timeout_example "${cpp_typesupport_target}")
 
 # タイムアウトテスト用の実行ファイル
 add_executable(timeout_test_example src/timeout_test_example.cpp)
@@ -123,24 +96,6 @@ ament_target_dependencies(add_client
 # 新しい方法でリンク
 target_link_libraries(add_client "${cpp_typesupport_target}")
 
-# ID送信テスト用の実行ファイル
-add_executable(id_send_example src/id_send_example.cpp)
-target_link_libraries(id_send_example searchid_lib serial_lib)
-ament_target_dependencies(id_send_example
-  rclcpp
-  std_msgs
-  std_srvs
-)
-target_link_libraries(id_send_example "${cpp_typesupport_target}")
-
-# ID送信例（安定版）
-add_executable(id_send_example_v2 src/id_send_example_v2.cpp)
-target_link_libraries(id_send_example_v2 searchid_lib serial_lib)
-ament_target_dependencies(id_send_example_v2
-  rclcpp
-)
-target_link_libraries(id_send_example_v2 "${cpp_typesupport_target}")
-
 # シリアル通信テスト用の実行ファイル
 add_executable(serial_test src/serial_test.cpp)
 target_link_libraries(serial_test serial_lib)
@@ -160,10 +115,7 @@ install(TARGETS
   serial_lib
   searchid_lib
   serial_example
-  searchid_example
   searchid_simple_example
-  id_request_example
-  id_request_timeout_example
   timeout_test_example
   topic_node
   add_server
@@ -203,15 +155,10 @@ install(
 install(TARGETS
   serial_example
   serial_test
-  searchid_example
   searchid_simple_example
-  id_request_example
-  id_request_timeout_example
   timeout_test_example
   add_server
   add_client
-  id_send_example
-  id_send_example_v2
   DESTINATION lib/${PROJECT_NAME}
 )
 
