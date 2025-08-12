@@ -35,16 +35,12 @@ int main(int argc, char *argv[])
 {
     rclcpp::init(argc, argv);
     std::srand(std::time(nullptr)); // 乱数シードを現在時刻で初期化
-    
-    // SearchID::ID の初期化
-    SearchID::ID::initialize();
-    
     // シリアル通信を宣言 - 利用可能な全ポートを試行
     std::vector<std::string> ports = {"/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyACM2"};
     std::vector<std::shared_ptr<SerialCommunication>> connected_devices;
 
     // SerialCommunicationの静的メソッドを使用してデバイススキャン
-    connected_devices = SerialCommunication::scanAndConnectDevices(ports, B115200, "|");
+    connected_devices = SerialCommunication::scanAndConnectDevices(ports, B9600, "|");
 
     if (connected_devices.empty())
     {
@@ -58,6 +54,7 @@ int main(int argc, char *argv[])
 
     // PC名を設定
     manager.setDeviceName("PC1");
+
     // ROSのエグゼキューターを使ってスピン（受信処理のため）
     rclcpp::executors::MultiThreadedExecutor executor;
     for (auto &device : connected_devices)

@@ -554,15 +554,13 @@ namespace SearchID
             }
 
             // 応答フォーマットの検証と解析（101,device_id の形式を期待）
-            size_t pos_101 = response.find("101,");
-            if (pos_101 != std::string::npos)
+            if (response.find("101,") == 0 || response.find("101") == 0)
             {
                 RCLCPP_INFO(rclcpp::get_logger("DeviceManager"),
                             "Valid start response received from %s: %s", device_name.c_str(), response.c_str());
 
-                // 101, 以降の部分を抽出して解析
-                std::string response_part = response.substr(pos_101);
-                std::vector<std::string> parts = splitString(response_part, ',');
+                // デバイスIDを抽出（101,nucleo1 の場合、nucleo1を抽出）
+                std::vector<std::string> parts = splitString(response, ',');
                 if (parts.size() >= 2)
                 {
                     std::string device_id = parts[1]; // nucleo1
@@ -571,18 +569,12 @@ namespace SearchID
                     RCLCPP_INFO(rclcpp::get_logger("DeviceManager"),
                                 "Device ID '%s' mapped to device '%s'", device_id.c_str(), device_name.c_str());
                 }
-                else
+                else if (parts.size() == 1 && parts[0] == "101")
                 {
+                    // "101"のみの場合、次の受信で残りを取得する可能性
                     RCLCPP_INFO(rclcpp::get_logger("DeviceManager"),
                                 "Partial response received from %s: %s", device_name.c_str(), response.c_str());
                 }
-            }
-
-            // SearchID::ID の応答処理（102, で始まる応答）
-            size_t pos_102 = response.find("102,");
-            if (pos_102 != std::string::npos && response_102_callback_)
-            {
-                response_102_callback_(response);
             }
             else
             {
@@ -691,12 +683,6 @@ namespace SearchID
         std::unordered_map<std::string, std::string> getDeviceIDMap() const
         {
             return device_id_map_;
-        }
-
-        // 102応答処理のコールバックを登録
-        void setResponse102Callback(std::function<void(const std::string&)> callback)
-        {
-            response_102_callback_ = callback;
         }
 
         // ID統合管理機能を開始
@@ -831,7 +817,7 @@ namespace SearchID
             }
 
             // 送信されたIDリストを統合リストに追加
-            for (int i = 3; i < 3 + id_count && i < static_cast<int>(parts.size()); ++i)
+            for (int i = 3; i < 3 + id_count && i < parts.size(); ++i)
             {
                 std::string device_id = parts[i];
                 if (!device_id.empty())
@@ -934,9 +920,6 @@ namespace SearchID
         std::unordered_map<std::string, std::chrono::steady_clock::time_point> response_start_time_; // レスポンス開始時刻
         std::unordered_map<std::string, std::chrono::steady_clock::time_point> start_response_time_; // start開始時刻
         std::unordered_map<std::string, rclcpp::TimerBase::SharedPtr> timeout_timers_;               // IDタイムアウトタイマー
-        
-        // 102応答処理のコールバック
-        std::function<void(const std::string&)> response_102_callback_;
         std::unordered_map<std::string, rclcpp::TimerBase::SharedPtr> start_timeout_timers_;         // startタイムアウトタイマー
         std::set<std::string> unusable_devices_;                                                     // 使用不可デバイス一覧
         std::unordered_map<std::string, std::string> device_id_map_;                                 // デバイスID → デバイス名のマッピング
@@ -1107,42 +1090,6 @@ namespace SearchID
         static std::unordered_map<std::string, int> pending_random_nums_;
 
     public:
-        // 静的応答処理メソッド（DeviceManagerから呼び出される）
-        static void handleResponse(const std::string &response)
-        {
-            size_t pos_102 = response.find("102,");
-            if (pos_102 != std::string::npos)
-            {
-                std::string response_part = response.substr(pos_102);
-                auto parts = splitString(response_part, ',');
-                if (parts.size() >= 4)
-                {
-                    std::string device_id = parts[1];
-                    int resp_rand = 0;
-                    try { resp_rand = std::stoi(parts[2]); } catch (...) {}
-                    std::string status = parts[3];
-                    
-                    RCLCPP_INFO(rclcpp::get_logger("ID"), "Response from %s: status=%s (random: %d)", device_id.c_str(), status.c_str(), resp_rand);
-                    
-                    // レスポンス受信をマーク
-                    std::string response_key = device_id + "_" + std::to_string(resp_rand);
-                    auto it = pending_responses_.find(response_key);
-                    if (it != pending_responses_.end())
-                    {
-                        pending_responses_.erase(response_key);
-                        pending_random_nums_.erase(response_key);
-                        RCLCPP_INFO(rclcpp::get_logger("ID"), "Response confirmed for %s (random: %d)", device_id.c_str(), resp_rand);
-                    }
-                }
-            }
-        }
-
-        // 初期化メソッド（コールバックを登録）
-        static void initialize()
-        {
-            DeviceManager::getInstance().setResponse102Callback(handleResponse);
-        }
-
         // 既存: IDを指定してメッセージ送信
         static bool send(const std::string &device_id, const std::string &message)
         {
@@ -1184,6 +1131,24 @@ namespace SearchID
             std::string response_key = device_id + "_" + std::to_string(random_num);
             pending_responses_[response_key] = std::chrono::steady_clock::now();
             pending_random_nums_[response_key] = random_num;
+
+            device->setReceiveCallback([device_id, random_num](const std::string &resp)
+                                       {
+            auto parts = splitString(resp, ',');
+            if (parts.size() >= 4 && parts[0] == "102" && parts[1] == device_id) {
+                int resp_rand = 0;
+                try { resp_rand = std::stoi(parts[2]); } catch (...) {}
+                if (resp_rand == random_num) {
+                    std::string status = parts[3];
+                    RCLCPP_INFO(rclcpp::get_logger("ID"), "Response from %s: status=%s", device_id.c_str(), status.c_str());
+                    std::cout << "[ID] Response from " << device_id << ": status=" << status << std::endl;
+                    
+                    // レスポンス受信をマーク
+                    std::string response_key = device_id + "_" + std::to_string(random_num);
+                    pending_responses_.erase(response_key);
+                    pending_random_nums_.erase(response_key);
+                }
+            } });
 
             return device->sendRaw(msg);
         }

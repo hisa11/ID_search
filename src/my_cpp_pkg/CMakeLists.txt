@@ -18,6 +18,7 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/AddThreeInts.srv"
   "msg/Controller.msg"
+  "srv/DataExchange.srv" 
 )
 
 # カスタムインターフェースのタイプサポートを取得

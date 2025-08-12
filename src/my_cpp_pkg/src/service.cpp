@@ -1,158 +1,117 @@
 #include "service.hpp"
+#include <chrono>
 
-using std::placeholders::_1; // bindで使用するプレースホルダー（第1引数用）
-using std::placeholders::_2; // bindで使用するプレースホルダー（第2引数用）
-using namespace std::chrono_literals; // 時間単位を使えるようにする
-
-// コンストラクタ：サービスIDを受け取ってノードを初期化
-Service::Service(const std::string &serviceID) 
-    : Node(serviceID), service_id_(serviceID), is_running_(false)
+// コンストラクタ：ランダム数生成器も初期化
+Service::Service(const std::string &node_name)
+    : Node(node_name), 
+      self_node_name_(node_name),
+      // 乱数のシード（種）を設定。これは変更不要です。
+      random_engine_(std::chrono::high_resolution_clock::now().time_since_epoch().count()),
+      // ★★★ ここを修正 ★★★
+      // 生成する乱数の範囲を 100000 から 999999 まで（6桁）に設定
+      distribution_(100000, 999999) 
 {
-    RCLCPP_INFO(this->get_logger(), "サービス '%s' を初期化しました", serviceID.c_str());
+    server_ = this->create_service<my_cpp_pkg::srv::DataExchange>(
+        self_node_name_,
+        std::bind(&Service::handle_request, this, std::placeholders::_1, std::placeholders::_2)
+    );
+    RCLCPP_INFO(this->get_logger(), "ノード '%s' が起動し、サービスリクエストを待機します。", self_node_name_.c_str());
 }
-
-// サービスを開始する関数
-void Service::start()
+void Service::set_data_handler(DataHandlerCallback callback)
 {
-    if (!is_running_) {
-        // サービスの作成（型：AddThreeInts、名前：サービスID、コールバック関数を登録）
-        service_ = this->create_service<my_cpp_pkg::srv::AddThreeInts>(
-            service_id_,                                                 // サービス名
-            std::bind(&Service::handle_service, this, _1, _2)          // コールバックをbind
-        );
-        is_running_ = true;
-        RCLCPP_INFO(this->get_logger(), "サービス '%s' を開始しました", service_id_.c_str());
+    data_handler_callback_ = callback;
+    RCLCPP_INFO(this->get_logger(), "外部データハンドラが登録されました。");
+}
+// リクエスト受信時の処理
+void Service::handle_request(
+    const std::shared_ptr<my_cpp_pkg::srv::DataExchange::Request> request,
+    std::shared_ptr<my_cpp_pkg::srv::DataExchange::Response> response)
+{
+    RCLCPP_INFO(this->get_logger(), "リクエスト受信 (TID: %ld)", request->transaction_id);
+    switch (request->request_type) {
+        case 2: // PC2からの初期リクエスト
+            RCLCPP_INFO(this->get_logger(), "  - Type 2: 初期リクエストを受信しました。");
+            RCLCPP_INFO(this->get_logger(), "  - Message: '%s'", request->message.c_str());
+            // ここで初期化処理などを実行
+            break;
+
+        case 4: // PC1からの定期連絡 (もし自分自身が受信した場合)
+            RCLCPP_INFO(this->get_logger(), "  - Type 4: 定期連絡を受信しました。");
+            break;
+        
+        case 10: // 緊急停止コマンド
+            RCLCPP_INFO(this->get_logger(), "  - Type 10: 緊急停止コマンドを受信！");
+            // (例) ロボットを停止させる関数を呼び出す
+            break;
+
+        default:
+            RCLCPP_WARN(this->get_logger(), "  - 未知のType %ld を受信しました。", request->request_type);
+            break;
     }
-}
 
-// サービスを停止する関数
-void Service::stop()
-{
-    if (is_running_) {
-        service_.reset(); // サービスオブジェクトをリセット
-        is_running_ = false;
-        RCLCPP_INFO(this->get_logger(), "サービス '%s' を停止しました", service_id_.c_str());
-    }
-}
-
-// サービスの状態を取得する関数
-bool Service::is_running() const
-{
-    return is_running_;
-}
-
-// サービスのコールバック関数：リクエストを受けてレスポンスを返す
-void Service::handle_service(
-    const std::shared_ptr<my_cpp_pkg::srv::AddThreeInts::Request> request,
-    std::shared_ptr<my_cpp_pkg::srv::AddThreeInts::Response> response)
-{
-    response->sum = request->a + request->b + request->c; // 3つの値の足し算を実行してsumに代入
-    
-    RCLCPP_INFO(this->get_logger(), 
-                "[%s] リクエスト: a = %ld, b = %ld, c = %ld",
-                service_id_.c_str(), request->a, request->b, request->c);
-    RCLCPP_INFO(this->get_logger(), 
-                "[%s] 応答: sum = %ld", 
-                service_id_.c_str(), response->sum);
-}
-
-// ========== Client クラスの実装 ==========
-
-// コンストラクタ：クライアントIDとサービス名を受け取ってクライアントを初期化
-Client::Client(const std::string &clientID, const std::string &service_name)
-    : Node(clientID), client_id_(clientID), service_name_(service_name), last_result_(0)
-{
-    // クライアント作成（AddThreeInts型、指定されたサービス名）
-    client_ = this->create_client<my_cpp_pkg::srv::AddThreeInts>(service_name_);
-    
-    RCLCPP_INFO(this->get_logger(), "クライアント '%s' を初期化しました（サービス: %s）", 
-                clientID.c_str(), service_name_.c_str());
-}
-
-// サービスにリクエストを送信（3つの値）
-bool Client::send_request(int64_t a, int64_t b, int64_t c)
-{
-    return send_request_internal(a, b, c);
-}
-
-// サービスにリクエストを送信（4つの値、dは使用されない）
-bool Client::send_request(int64_t a, int64_t b, int64_t c, int64_t d)
-{
-    RCLCPP_WARN(this->get_logger(), "4番目のパラメータ d=%ld は無視されます", d);
-    return send_request_internal(a, b, c);
-}
-
-// 内部的なリクエスト送信処理
-bool Client::send_request_internal(int64_t a, int64_t b, int64_t c)
-{
-    // サービスが利用可能でない場合は失敗
-    if (!is_service_available()) {
-        RCLCPP_ERROR(this->get_logger(), "サービス '%s' が利用できません", service_name_.c_str());
-        return false;
-    }
-    
-    // リクエストオブジェクトを作成し、a、b、cに値を設定
-    auto request = std::make_shared<my_cpp_pkg::srv::AddThreeInts::Request>();
-    request->a = a;
-    request->b = b;
-    request->c = c;
-    
-    RCLCPP_INFO(this->get_logger(), "[%s] リクエスト送信: a=%ld, b=%ld, c=%ld", 
-                client_id_.c_str(), a, b, c);
-    
-    // 非同期でリクエストを送信し、結果（Future）を取得
-    auto result_future = client_->async_send_request(request);
-    
-    // Futureが完了するまで待機（成功したら結果を出力）
-    if (rclcpp::spin_until_future_complete(shared_from_this(), result_future) ==
-        rclcpp::FutureReturnCode::SUCCESS)
-    {
-        last_result_ = result_future.get()->sum;
-        RCLCPP_INFO(this->get_logger(), "[%s] 結果: %ld + %ld + %ld = %ld", 
-                    client_id_.c_str(), a, b, c, last_result_);
-        return true;
+    // ★★★ ここで外部から登録されたコールバックを呼び出す ★★★
+    if (data_handler_callback_) {
+        // コールバックが登録されていれば、受信したリクエストデータを渡して実行
+        data_handler_callback_(request);
     } else {
-        RCLCPP_ERROR(this->get_logger(), "[%s] サービス呼び出しに失敗しました", client_id_.c_str());
-        return false;
-    }
-}
-
-// 最後のレスポンス結果を取得
-int64_t Client::get_last_result() const
-{
-    return last_result_;
-}
-
-// サービスが利用可能かチェック
-bool Client::is_service_available()
-{
-    return client_->service_is_ready();
-}
-
-// サービスが利用可能になるまで待機
-bool Client::wait_for_service(std::chrono::seconds timeout)
-{
-    auto start_time = std::chrono::steady_clock::now();
-    
-    // サーバーが利用可能になるまで待機（0.1秒ずつ確認）
-    while (!client_->wait_for_service(100ms)) {
-        if (!rclcpp::ok()) {  // 強制終了された場合
-            RCLCPP_ERROR(this->get_logger(), "サービス待機中に中断されました");
-            return false;
-        }
-        
-        // タイムアウトチェック
-        auto elapsed = std::chrono::steady_clock::now() - start_time;
-        if (elapsed >= timeout) {
-            RCLCPP_ERROR(this->get_logger(), "サービス '%s' の待機がタイムアウトしました", 
-                        service_name_.c_str());
-            return false;
-        }
-        
-        RCLCPP_INFO(this->get_logger(), "サービス '%s' 待機中...", service_name_.c_str());
+        // コールバックが登録されていない場合のデフォルトの動作
+        RCLCPP_WARN(this->get_logger(), "データハンドラが登録されていません。データをログ出力します。");
+        RCLCPP_INFO(this->get_logger(), "  - Type: %ld", request->request_type);
+        RCLCPP_INFO(this->get_logger(), "  - Message: '%s'", request->message.c_str());
     }
     
-    RCLCPP_INFO(this->get_logger(), "サービス '%s' が利用可能になりました", service_name_.c_str());
-    return true;
+    // レスポンス作成 (共通処理)
+    response->response_type = 102;
+    response->return_node = this->get_name();
+    response->transaction_id = request->transaction_id;
+    response->values = {};
+    
+    RCLCPP_INFO(this->get_logger(), "レスポンスを返信します (TID: %ld)", response->transaction_id);
+}
+// データ送信関数
+void Service::send_custom_request(
+    const std::string &target_node_name,
+    int64_t request_type,
+    const std::string &destination_node,
+    const std::vector<int64_t> &values,
+    const std::string &message)
+{
+    auto client = get_client(target_node_name);
+
+    if (!client->service_is_ready()) {
+        RCLCPP_WARN(this->get_logger(), "サービス '%s' はまだ利用できません。", target_node_name.c_str());
+        // 必要に応じてここでリターンするか、送信を試みるか選択
+    }
+
+    auto request = std::make_shared<my_cpp_pkg::srv::DataExchange::Request>();
+    request->request_type = request_type;
+    request->destination_node = destination_node;
+    request->transaction_id = distribution_(random_engine_); // ランダムなIDを生成
+    request->values = values;
+    request->message = message;
+    
+    RCLCPP_INFO(this->get_logger(), "リクエスト送信 (TID: %ld) -> %s", request->transaction_id, target_node_name.c_str());
+
+    auto response_callback = [this](rclcpp::Client<my_cpp_pkg::srv::DataExchange>::SharedFuture future) {
+        try {
+            auto response = future.get();
+            RCLCPP_INFO(this->get_logger(), "レスポンス受信:");
+            RCLCPP_INFO(this->get_logger(), "  - Type: %ld", response->response_type);
+            RCLCPP_INFO(this->get_logger(), "  - From: %s", response->return_node.c_str());
+            RCLCPP_INFO(this->get_logger(), "  - TID: %ld", response->transaction_id);
+        } catch (const std::exception &e) {
+            RCLCPP_ERROR(this->get_logger(), "サービス呼び出し中に例外が発生: %s", e.what());
+        }
+    };
+    
+    client->async_send_request(request, response_callback);
 }
 
+// クライアント取得ヘルパー (変更なし)
+rclcpp::Client<my_cpp_pkg::srv::DataExchange>::SharedPtr Service::get_client(const std::string &service_name)
+{
+    if (clients_.find(service_name) == clients_.end()) {
+        clients_[service_name] = this->create_client<my_cpp_pkg::srv::DataExchange>(service_name);
+    }
+    return clients_[service_name];
+}

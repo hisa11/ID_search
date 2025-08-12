@@ -1,0 +1,14 @@
+# Request
+int64 request_type          # リクエストの種類 (例: 2)
+string destination_node     # 宛先ノード名 (例: "PC1")
+int64 transaction_id        # 一意のトランザクションID (ランダムな数値)
+int64[] values              # 送信する値の配列 (値の数は .size() で取得)
+string message              # 追加の文字列メッセージ
+
+---
+
+# Response
+int64 response_type         # レスポンスの種類 (例: 102)
+string return_node          # 応答の宛先ノード名 (リクエスト元)
+int64 transaction_id        # 対応するリクエストのトランザクションID
+int64[] values              # 返信する値の配列 (基本は空)

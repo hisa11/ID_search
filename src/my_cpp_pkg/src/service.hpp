@@ -1,78 +1,56 @@
 #ifndef SERVICE_HPP
 #define SERVICE_HPP
 
-#include "rclcpp/rclcpp.hpp"                        // ROS 2 の基本ヘッダー（ノード、ロガーなど）
-#include "my_cpp_pkg/srv/add_three_ints.hpp"        // カスタムサービス型（AddThreeInts）
-#include <memory>                                   // std::shared_ptr を使うために必要
-#include <string>                                   // std::string を使うために必要
-#include <vector>                                   // std::vector を使うために必要
-#include <chrono>                                   // 時間処理用（wait用）
+#include "rclcpp/rclcpp.hpp"
+#include "my_cpp_pkg/srv/data_exchange.hpp"
+#include <string>
+#include <vector>
+#include <memory>
+#include <map>
+#include <chrono>
+#include <random>
+#include <functional> // std::function を使うために必要
 
-// サービス設定を格納する構造体
-struct service_set
-{
-    std::string serviceID;      // サービスID
-    std::vector<int8_t> values; // 値の配列
-};
-
-// サービス通信のサーバー側クラス
 class Service : public rclcpp::Node
 {
 public:
-    // コンストラクタ：サービスIDを受け取ってサーバーを初期化
-    Service(const std::string &serviceID);
+    using DataHandlerCallback = std::function<void(const std::shared_ptr<my_cpp_pkg::srv::DataExchange::Request>)>;
+
+    explicit Service(const std::string &node_name);
+
+    /**
+     * @brief 新しいプロトコルでデータを非同期に送信します。
+     * @param target_node_name サービスを呼び出す相手のノード名
+     * @param request_type リクエストの種類
+     * @param destination_node 最終的な宛先ノード名
+     * @param values 送信する値の配列
+     * @param message 追加の文字列メッセージ
+     */
+    void send_custom_request(
+        const std::string &target_node_name,
+        int64_t request_type,
+        const std::string &destination_node,
+        const std::vector<int64_t> &values,
+        const std::string &message);
     
-    // サービスを開始する関数
-    void start();
-    
-    // サービスを停止する関数
-    void stop();
-    
-    // サービスの状態を取得する関数
-    bool is_running() const;
+    void set_data_handler(DataHandlerCallback callback);
 
 private:
-    // サービスのコールバック関数：リクエストを受けてレスポンスを返す
-    void handle_service(
-        const std::shared_ptr<my_cpp_pkg::srv::AddThreeInts::Request> request,
-        std::shared_ptr<my_cpp_pkg::srv::AddThreeInts::Response> response
-    );
-    
-    std::string service_id_;                                                           // サービスID
-    bool is_running_;                                                                  // サービス実行状態
-    rclcpp::Service<my_cpp_pkg::srv::AddThreeInts>::SharedPtr service_;              // サービスオブジェクト
+    void handle_request(
+        const std::shared_ptr<my_cpp_pkg::srv::DataExchange::Request> request,
+        std::shared_ptr<my_cpp_pkg::srv::DataExchange::Response> response);
+
+    rclcpp::Client<my_cpp_pkg::srv::DataExchange>::SharedPtr get_client(const std::string &service_name);
+
+    // メンバ変数
+    std::string self_node_name_;
+    rclcpp::Service<my_cpp_pkg::srv::DataExchange>::SharedPtr server_;
+    std::map<std::string, rclcpp::Client<my_cpp_pkg::srv::DataExchange>::SharedPtr> clients_;
+
+    // ランダムなトランザクションIDを生成するための装置
+    std::mt19937_64 random_engine_;
+    std::uniform_int_distribution<int64_t> distribution_;
+    DataHandlerCallback data_handler_callback_;
 };
 
-// サービス通信のクライアント側クラス
-class Client : public rclcpp::Node
-{
-public:
-    // コンストラクタ：クライアントIDとサービス名を受け取って初期化
-    Client(const std::string &clientID, const std::string &service_name = "add_three_ints");
-    
-    // サービスにリクエストを送信（3つの値）
-    bool send_request(int64_t a, int64_t b, int64_t c);
-    
-    // サービスにリクエストを送信（4つの値、dは使用されない）
-    bool send_request(int64_t a, int64_t b, int64_t c, int64_t d);
-    
-    // 最後のレスポンス結果を取得
-    int64_t get_last_result() const;
-    
-    // サービスが利用可能かチェック
-    bool is_service_available();
-    
-    // サービスが利用可能になるまで待機
-    bool wait_for_service(std::chrono::seconds timeout = std::chrono::seconds(10));
-
-private:
-    std::string client_id_;                                                           // クライアントID
-    std::string service_name_;                                                        // サービス名
-    int64_t last_result_;                                                            // 最後の結果
-    rclcpp::Client<my_cpp_pkg::srv::AddThreeInts>::SharedPtr client_;              // クライアントオブジェクト
-    
-    // 内部的なリクエスト送信処理
-    bool send_request_internal(int64_t a, int64_t b, int64_t c);
-};
-
-#endif
+#endif // SERVICE_HPP

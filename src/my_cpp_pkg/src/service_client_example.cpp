@@ -1,30 +1,49 @@
 #include "service.hpp"
 #include <rclcpp/rclcpp.hpp>
-#include <chrono>
+#include <vector>
 #include <thread>
 
 int main(int argc, char *argv[])
 {
     rclcpp::init(argc, argv);
 
-    // クライアントIDとサービス名を指定してクライアントを作成
-    auto client_node = std::make_shared<Client>("add_three_ints_client", "add_three_ints");
+    // ノードを作成
+    auto node_pc2 = std::make_shared<Service>("PC3");
 
-    // サービスが利用可能になるまで待機
-    if (!client_node->wait_for_service(std::chrono::seconds(5))) {
-        RCLCPP_ERROR(client_node->get_logger(), "サービスが利用できません。終了します。");
-        rclcpp::shutdown();
-        return 1;
+    // =============================================================
+    // データ送信を別スレッドで行うように変更
+    // =============================================================
+    std::thread sender_thread([&]() {
+        // PC1 が起動するのを少し待つ
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+
+        // 送信データの準備
+        std::string target_node = "PC1";
+        int64_t request_type = 2;
+        std::string dest_node = "PC1";
+        std::vector<int64_t> values = {30, 10, 20}; // 例の値を設定
+        std::string message = "PC2からの初期リクエスト";
+
+        RCLCPP_INFO(node_pc2->get_logger(), "'%s' にデータを送信します。", target_node.c_str());
+
+        // 非同期でデータを送信
+        node_pc2->send_custom_request(target_node, request_type, dest_node, values, message);
+    });
+
+    // メインスレッドはすぐに spin を開始し、リクエスト待機に入る
+    RCLCPP_INFO(node_pc2->get_logger(), "ノード 'PC2' を起動しました。送受信待機中です...");
+
+    // マルチスレッドエグゼキュータで spin を開始
+    // これにより、sender_thread での送信処理と、外部からのリクエスト受信を同時に処理できる
+    rclcpp::executors::MultiThreadedExecutor executor;
+    executor.add_node(node_pc2);
+    executor.spin();
+
+    // プログラム終了時にスレッドを合流させる
+    if (sender_thread.joinable()) {
+        sender_thread.join();
     }
-
-    // サービスにリクエスト送信
-    int64_t a = 10, b = 20, c = 30;
-    if (client_node->send_request(a, b, c)) {
-        RCLCPP_INFO(client_node->get_logger(), "レスポンス: %ld", client_node->get_last_result());
-    } else {
-        RCLCPP_ERROR(client_node->get_logger(), "サービス呼び出しに失敗しました");
-    }
-
+    
     rclcpp::shutdown();
     return 0;
 }
