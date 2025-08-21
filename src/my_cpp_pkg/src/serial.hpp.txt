@@ -11,8 +11,6 @@
 #include <functional>
 #include <memory>
 
-speed_t convert_baudrate(const std::string& baudrate_str);
-
 class SerialCommunication : public rclcpp::Node
 {
 public:
@@ -48,9 +46,6 @@ public:
 
     // ポートの状態を取得
     bool isOpen() const;
-
-    // シリアルバッファをフラッシュ
-    void flushPort();
 
     // 静的メソッド: 指定されたポートリストからデバイスをスキャンして接続
     static std::vector<std::shared_ptr<SerialCommunication>> scanAndConnectDevices(

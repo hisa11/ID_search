@@ -144,6 +144,14 @@ target_link_libraries(service_lib ${cpp_typesupport_target})
 
 target_include_directories(service_lib PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>)
 
+# integration ライブラリ
+add_library(integration_lib src/integration.cpp)
+target_link_libraries(integration_lib serial_lib)
+ament_target_dependencies(integration_lib rclcpp)
+target_link_libraries(integration_lib ${cpp_typesupport_target})
+
+target_include_directories(integration_lib PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>)
+
 # サービスサンプル
 add_executable(service_server_example src/service_server_example.cpp)
 target_link_libraries(service_server_example service_lib topic_lib)
@@ -159,6 +167,42 @@ add_dependencies(service_client_example my_cpp_pkg__cpp)
 target_include_directories(service_client_example PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>)
 target_link_libraries(service_client_example ${cpp_typesupport_target})
 
+# integration サンプル
+# add_executable(integration_explain src/integration_explain.cpp)
+# target_link_libraries(integration_explain integration_lib serial_lib)
+# ament_target_dependencies(integration_explain rclcpp)
+# add_dependencies(integration_explain my_cpp_pkg__cpp)
+# target_include_directories(integration_explain PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>)
+# target_link_libraries(integration_explain ${cpp_typesupport_target})
+
+add_executable(integration_pc1_example src/integration_pc1_example.cpp)
+target_link_libraries(integration_pc1_example integration_lib serial_lib)
+ament_target_dependencies(integration_pc1_example rclcpp)
+add_dependencies(integration_pc1_example my_cpp_pkg__cpp)
+target_include_directories(integration_pc1_example PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>)
+target_link_libraries(integration_pc1_example ${cpp_typesupport_target})
+
+add_executable(integration_pc2_example src/integration_pc2_example.cpp)
+target_link_libraries(integration_pc2_example integration_lib serial_lib)
+ament_target_dependencies(integration_pc2_example rclcpp)
+add_dependencies(integration_pc2_example my_cpp_pkg__cpp)
+target_include_directories(integration_pc2_example PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>)
+target_link_libraries(integration_pc2_example ${cpp_typesupport_target})
+
+# add_executable(microcontroller_test src/microcontroller_test.cpp)
+# target_link_libraries(microcontroller_test integration_lib serial_lib)
+# ament_target_dependencies(microcontroller_test rclcpp)
+# add_dependencies(microcontroller_test my_cpp_pkg__cpp)
+# target_include_directories(microcontroller_test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>)
+# target_link_libraries(microcontroller_test ${cpp_typesupport_target})
+
+# add_executable(baudrate_test src/baudrate_test.cpp)
+# target_link_libraries(baudrate_test integration_lib serial_lib)
+# ament_target_dependencies(baudrate_test rclcpp)
+# add_dependencies(baudrate_test my_cpp_pkg__cpp)
+# target_include_directories(baudrate_test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>)
+# target_link_libraries(baudrate_test ${cpp_typesupport_target})
+
 # ヘッダーファイルのインストール
 install(
   DIRECTORY src/
@@ -171,6 +215,7 @@ install(TARGETS
   serial_lib
   searchid_lib
   topic_lib
+  integration_lib
   serial_example
   searchid_simple_example
   timeout_test_example
@@ -180,6 +225,11 @@ install(TARGETS
   add_client
   service_server_example
   service_client_example
+  # integration_explain
+  integration_pc1_example
+  integration_pc2_example
+  # microcontroller_test
+  # baudrate_test
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -187,6 +237,7 @@ install(TARGETS
 ament_export_targets(serial_lib_targets HAS_LIBRARY_TARGET)
 ament_export_targets(searchid_lib_targets HAS_LIBRARY_TARGET)
 ament_export_targets(topic_lib_targets HAS_LIBRARY_TARGET)
+ament_export_targets(integration_lib_targets HAS_LIBRARY_TARGET)
 ament_export_dependencies(
   rclcpp
   std_msgs
@@ -223,6 +274,15 @@ install(
   INCLUDES DESTINATION include
 )
 
+install(
+  TARGETS integration_lib
+  EXPORT integration_lib_targets
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib
+  RUNTIME DESTINATION bin
+  INCLUDES DESTINATION include
+)
+
 # 実行ファイルのインストール
 install(TARGETS
   serial_example
@@ -235,6 +295,11 @@ install(TARGETS
   service_server_example
   service_client_example
   sendid_simple_example
+  # integration_explain
+  integration_pc1_example
+  integration_pc2_example
+  # microcontroller_test
+  # baudrate_test
   DESTINATION lib/${PROJECT_NAME}
 )
 

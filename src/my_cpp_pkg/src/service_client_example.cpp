@@ -1,49 +1,33 @@
 #include "service.hpp"
 #include <rclcpp/rclcpp.hpp>
 #include <vector>
-#include <thread>
+#include <string>
 
 int main(int argc, char *argv[])
 {
     rclcpp::init(argc, argv);
+    
+    rclcpp::NodeOptions options;
+    options.automatically_declare_parameters_from_overrides(true);
+    auto temp_node_for_param = std::make_shared<rclcpp::Node>("param_getter", options);
+    
+    // ★★★ ここを修正 ★★★
+    // "PC2" を std::string("PC2") に変更して、型を明示的にする
+    std::string node_name = temp_node_for_param->get_parameter_or("node_name", std::string("PC2"));
 
-    // ノードを作成
-    auto node_pc2 = std::make_shared<Service>("PC3");
+    // こちらは元々正しい型なので変更不要
+    std::vector<std::string> my_microcontrollers = temp_node_for_param->get_parameter_or("microcontrollers", std::vector<std::string>({}));
 
-    // =============================================================
-    // データ送信を別スレッドで行うように変更
-    // =============================================================
-    std::thread sender_thread([&]() {
-        // PC1 が起動するのを少し待つ
-        std::this_thread::sleep_for(std::chrono::seconds(2));
+    auto node = std::make_shared<Service>(node_name, my_microcontrollers);
 
-        // 送信データの準備
-        std::string target_node = "PC1";
-        int64_t request_type = 2;
-        std::string dest_node = "PC1";
-        std::vector<int64_t> values = {30, 10, 20}; // 例の値を設定
-        std::string message = "PC2からの初期リクエスト";
-
-        RCLCPP_INFO(node_pc2->get_logger(), "'%s' にデータを送信します。", target_node.c_str());
-
-        // 非同期でデータを送信
-        node_pc2->send_custom_request(target_node, request_type, dest_node, values, message);
+    node->set_data_handler([&](const std::shared_ptr<my_cpp_pkg::srv::DataExchange::Request> request){
+        RCLCPP_INFO(node->get_logger(), "[Handler] 自分宛のメッセージ(Type: %ld)を受信しました！", request->request_type);
+        RCLCPP_INFO(node->get_logger(), "[Handler]   - 送信元: %s", request->source_node.c_str());
+        RCLCPP_INFO(node->get_logger(), "[Handler]   - メッセージ: %s", request->message.c_str());
     });
 
-    // メインスレッドはすぐに spin を開始し、リクエスト待機に入る
-    RCLCPP_INFO(node_pc2->get_logger(), "ノード 'PC2' を起動しました。送受信待機中です...");
-
-    // マルチスレッドエグゼキュータで spin を開始
-    // これにより、sender_thread での送信処理と、外部からのリクエスト受信を同時に処理できる
-    rclcpp::executors::MultiThreadedExecutor executor;
-    executor.add_node(node_pc2);
-    executor.spin();
-
-    // プログラム終了時にスレッドを合流させる
-    if (sender_thread.joinable()) {
-        sender_thread.join();
-    }
-    
+    RCLCPP_INFO(node->get_logger(), "ノード '%s' を起動しました。待機します...", node->get_name());
+    rclcpp::spin(node);
     rclcpp::shutdown();
     return 0;
 }

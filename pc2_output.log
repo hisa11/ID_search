@@ -1,0 +1,213 @@
+
+╔══════════════════════════════════════╗
+║         PC2 統合通信システム         ║
+║ マイコン: nucleo2, nucleo3           ║
+║ 機能: サブ制御、応答処理             ║
+║ ボーレート: 115200 bps               ║
+╚══════════════════════════════════════╝
+[INFO] [1755525451.255113930] [SerialCommunication]: Scanning for serial devices...
+[INFO] [1755525451.255148105] [SerialCommunication]: Trying to connect to /dev/ttyACM0
+[INFO] [1755525451.257537310] [device0_node]: SerialCommunication node created
+[INFO] [1755525451.257580051] [device0_node]: Port: /dev/ttyACM0, Delimiter: '|'
+[INFO] [1755525451.257858338] [device0_node]: Serial port initialized successfully
+[INFO] [1755525451.257867005] [SerialCommunication]: Successfully connected to /dev/ttyACM0
+[INFO] [1755525451.257895278] [SerialCommunication]: Trying to connect to /dev/ttyACM1
+[INFO] [1755525451.260826840] [device1_node]: SerialCommunication node created
+[INFO] [1755525451.260892014] [device1_node]: Port: /dev/ttyACM1, Delimiter: '|'
+[ERROR] [1755525451.260929785] [device1_node]: Failed to open serial port: /dev/ttyACM1
+[WARN] [1755525451.260962227] [SerialCommunication]: Failed to connect to /dev/ttyACM1
+[INFO] [1755525451.262577175] [SerialCommunication]: Trying to connect to /dev/ttyACM2
+[INFO] [1755525451.264813130] [device1_node]: SerialCommunication node created
+[INFO] [1755525451.264830613] [device1_node]: Port: /dev/ttyACM2, Delimiter: '|'
+[ERROR] [1755525451.264843718] [device1_node]: Failed to open serial port: /dev/ttyACM2
+[WARN] [1755525451.264851303] [SerialCommunication]: Failed to connect to /dev/ttyACM2
+[INFO] [1755525451.266235243] [SerialCommunication]: Trying to connect to /dev/ttyACM3
+[INFO] [1755525451.269050245] [device1_node]: SerialCommunication node created
+[INFO] [1755525451.269081654] [device1_node]: Port: /dev/ttyACM3, Delimiter: '|'
+[ERROR] [1755525451.269099879] [device1_node]: Failed to open serial port: /dev/ttyACM3
+[WARN] [1755525451.269110369] [SerialCommunication]: Failed to connect to /dev/ttyACM3
+[INFO] [1755525451.270448914] [SerialCommunication]: Trying to connect to /dev/ttyUSB0
+[INFO] [1755525451.272300280] [device1_node]: SerialCommunication node created
+[INFO] [1755525451.272340687] [device1_node]: Port: /dev/ttyUSB0, Delimiter: '|'
+[ERROR] [1755525451.272368770] [device1_node]: Failed to open serial port: /dev/ttyUSB0
+[WARN] [1755525451.272382025] [SerialCommunication]: Failed to connect to /dev/ttyUSB0
+[INFO] [1755525451.274451544] [SerialCommunication]: Trying to connect to /dev/ttyUSB1
+[INFO] [1755525451.277498746] [device1_node]: SerialCommunication node created
+[INFO] [1755525451.277528783] [device1_node]: Port: /dev/ttyUSB1, Delimiter: '|'
+[ERROR] [1755525451.277547819] [device1_node]: Failed to open serial port: /dev/ttyUSB1
+[WARN] [1755525451.277557998] [SerialCommunication]: Failed to connect to /dev/ttyUSB1
+[INFO] [1755525451.278775935] [SerialCommunication]: Trying to connect to /dev/ttyUSB2
+[INFO] [1755525451.281384355] [device1_node]: SerialCommunication node created
+[INFO] [1755525451.281425974] [device1_node]: Port: /dev/ttyUSB2, Delimiter: '|'
+[ERROR] [1755525451.281450831] [device1_node]: Failed to open serial port: /dev/ttyUSB2
+[WARN] [1755525451.281466260] [SerialCommunication]: Failed to connect to /dev/ttyUSB2
+[INFO] [1755525451.283307848] [SerialCommunication]: Trying to connect to /dev/ttyUSB3
+[INFO] [1755525451.285539525] [device1_node]: SerialCommunication node created
+[INFO] [1755525451.285557318] [device1_node]: Port: /dev/ttyUSB3, Delimiter: '|'
+[ERROR] [1755525451.285573038] [device1_node]: Failed to open serial port: /dev/ttyUSB3
+[WARN] [1755525451.285583067] [SerialCommunication]: Failed to connect to /dev/ttyUSB3
+[INFO] [1755525451.287138824] [SerialCommunication]: Connected 1 device(s)
+[INFO] [1755525451.287193938] [create_system]: シリアル自動検出: ボーレート 115200 bps で 1個のデバイスを発見
+[INFO] [1755525451.287341538] [device0_node]: Started receiving data - timer created
+[INFO] [1755525451.287356446] [device0_node]: Serial fd: 39, is_receiving: 1
+[INFO] [1755525451.287364301] [create_system]: シリアルデバイス受信開始: device0_node
+[WARN] [1755525451.290736517] [device0_node]: Already receiving
+[INFO] [1755525451.290763198] [PC2]: シリアルコールバック設定: device0
+[INFO] [1755525451.290770852] [PC2]: [32m統合通信システム 'PC2' が起動しました。[0m
+[INFO] [1755525451.290775491] [PC2]: マイコン: 2個, シリアルデバイス: 1個
+[INFO] [1755525451.290785410] [create_system]: [32m統合システム作成完了: PC2 (マイコン: 2個, シリアル: 1個, ボーレート: 115200)[0m
+[INFO] [1755525451.290799076] [PC2]: データハンドラが登録されました。
+[INFO] [1755525451.290807291] [PC2]: シリアルデータハンドラが登録されました。
+
+⚡ PC2システム起動中...
+PC1からの要求とマイコンからのデータを待機
+
+⏳ システム初期化待機中...
+
+🚀 === 初期化シーケンス開始 ===
+[INFO] [1755525454.291100829] [PC2]: [34m=== 統合システム初期化開始 ===[0m
+[INFO] [1755525454.291183877] [PC2]: [33mフェーズ1: マイコンID探索をスキップ[0m
+[INFO] [1755525454.291190239] [PC2]: [34mフェーズ2: ノード探索とマッピング[0m
+[INFO] [1755525454.291197552] [PC2]: [33mノード探索とマッピングを開始します（タイムアウト: 3000ms）[0m
+[INFO] [1755525454.292860752] [PC2]: ノード /PC2 にマイコン情報を問い合わせ
+[INFO] [1755525454.292925475] [PC2]: リクエスト受信 - Type: 1, Source: PC2, Dest: /PC2, TID: 377262
+[INFO] [1755525454.292938249] [PC2]: ノード /PC2 にマイコン情報を問い合わせ
+[INFO] [1755525454.292983024] [PC2]: ノード PC2 に転送
+
+📨 [ノード通信受信] PC2 から:
+   タイプ: 1
+   宛先: /PC2
+   TID: 377262
+   メッセージ: マイコン情報問い合わせ
+[INFO] [1755525454.293018942] [PC2]: ノード /PC2 にマイコン情報を問い合わせ
+   受信データ配列 (2個):
+     [0] nucleo2
+     [1] nucleo3
+[INFO] [1755525454.293048097] [PC2]: マイコンロケーション追加: nucleo2 -> PC2
+[INFO] [1755525454.293056884] [PC2]: マイコンロケーション追加: nucleo3 -> PC2
+[INFO] [1755525454.293155100] [PC2]: リクエスト受信 - Type: 1, Source: PC2, Dest: /PC2, TID: 407200
+[INFO] [1755525454.293219862] [PC2]: ノード PC2 に転送
+
+📨 [ノード通信受信] PC2 から:
+   タイプ: 1
+   宛先: /PC2
+   TID: 407200
+   メッセージ: マイコン情報問い合わせ
+   受信データ配列 (2個):
+     [0] nucleo2
+     [1] nucleo3
+[INFO] [1755525454.293251332] [PC2]: マイコンロケーション追加: nucleo2 -> PC2
+[INFO] [1755525454.293260129] [PC2]: マイコンロケーション追加: nucleo3 -> PC2
+[INFO] [1755525454.293520271] [PC2]: ノード /PC1 にマイコン情報を問い合わせ
+[INFO] [1755525454.293530380] [PC2]: リクエスト受信 - Type: 1, Source: PC2, Dest: /PC2, TID: 291836
+[INFO] [1755525454.293585274] [PC2]: ノード PC2 に転送
+
+📨 [ノード通信受信] PC2 から:
+   タイプ: 1
+   宛先: /PC2
+   TID: 291836
+   メッセージ: マイコン情報問い合わせ
+   受信データ配列 (2個):
+     [0] nucleo2
+     [1] nucleo3
+[INFO] [1755525454.293627655] [PC2]: マイコンロケーション追加: nucleo2 -> PC2
+[INFO] [1755525454.293633395] [PC2]: マイコンロケーション追加: nucleo3 -> PC2
+[INFO] [1755525454.372401685] [PC2]: リクエスト受信 - Type: 10, Source: PC1, Dest: nucleo2, TID: 467119
+[INFO] [1755525454.372872377] [PC2]: ノード PC2 に転送
+
+📨 [ノード通信受信] PC1 から:
+   タイプ: 10
+   宛先: nucleo2
+   TID: 467119
+   メッセージ: PC1からの制御タスク
+   受信データ配列 (4個):
+     [0] EXECUTE_TASK
+     [1] motion_control
+     [2] speed:50
+     [3] direction:forward
+   🔄 受信データをマイコンに転送中...
+[INFO] [1755525454.372911430] [PC2]: マイコン nucleo2 にデータ送信: 4個の要素
+[WARN] [1755525454.372931909] [PC2]: マイコン nucleo2 がローカルで見つからません。他のノードを検索中...
+[ERROR] [1755525454.372942740] [PC2]: ❌ マイコン nucleo2 がネットワーク内で見つかりません
+   ❌ マイコンへの転送失敗
+[INFO] [1755525457.298579901] [PC2]: [32mノードマッピング完了: 1個のノードを発見[0m
+[INFO] [1755525457.298653290] [PC2]:   - PC2: 2個のマイコン
+[INFO] [1755525457.298666344] [PC2]:     * nucleo2
+[INFO] [1755525457.298673618] [PC2]:     * nucleo3
+[INFO] [1755525457.298711480] [PC2]: [32m=== 統合システム初期化完了 ===[0m
+[INFO] [1755525457.298729624] [PC2]: 発見されたマイコン: 0個
+[INFO] [1755525457.298737569] [PC2]: 発見されたノード: 1個
+[INFO] [1755525457.298743631] [PC2]: システムが通信可能状態になりました。
+
+✅ システム初期化完了！PC1経由送信テストを開始します。
+
+📋 [PC2テスト] PC1経由でnucleo1に「apple」送信
+   PC2 → PC1 → nucleo1 のルートで送信を試行...
+送信データ (ID2フォーマット): [2] [PC2] [nucleo1] [1] [apple] 
+実際の送信: 2,PC2,nucleo1,1,apple|
+[INFO] [1755525460.298896621] [PC2]: マイコン nucleo1 にデータ送信: 5個の要素
+[WARN] [1755525460.298950303] [PC2]: マイコン nucleo1 がローカルで見つからません。他のノードを検索中...
+[ERROR] [1755525460.298972595] [PC2]: ❌ マイコン nucleo1 がネットワーク内で見つかりません
+❌ PC1経由でnucleo1への送信失敗
+
+📋 [PC2テスト] 他のマイコンへの送信テスト
+   nucleo2への送信を試行...
+[INFO] [1755525463.299105864] [PC2]: マイコン nucleo2 にデータ送信: 2個の要素
+[WARN] [1755525463.299162331] [PC2]: マイコン nucleo2 がローカルで見つからません。他のノードを検索中...
+[ERROR] [1755525463.299189393] [PC2]: ❌ マイコン nucleo2 がネットワーク内で見つかりません
+⚠️  nucleo2への送信失敗（マイコンが見つからない）
+   nucleo3への送信を試行...
+[INFO] [1755525463.299225210] [PC2]: マイコン nucleo3 にデータ送信: 2個の要素
+[WARN] [1755525463.299232234] [PC2]: マイコン nucleo3 がローカルで見つからません。他のノードを検索中...
+[ERROR] [1755525463.299241842] [PC2]: ❌ マイコン nucleo3 がネットワーク内で見つかりません
+⚠️  nucleo3への送信失敗（マイコンが見つからない）
+
+🔄 === PC2待機完了 ===
+💡 PC1からの通信や転送要求を待機中...
+📝 テスト用シリアルデータ例:
+   SENSOR_DATA,temperature,25.6,humidity,60.2|
+   FORWARD_TO_NODE,PC1,response,processing_complete|
+[INFO] [1755525463.373281126] [PC2]: リクエスト受信 - Type: 10, Source: PC1, Dest: nucleo2, TID: 520892
+[INFO] [1755525463.373348894] [PC2]: ノード PC2 に転送
+
+📨 [ノード通信受信] PC1 から:
+   タイプ: 10
+   宛先: nucleo2
+   TID: 520892
+   メッセージ: マイコン転送要求
+   受信データ配列 (5個):
+     [0] 2
+     [1] PC1
+     [2] nucleo2
+     [3] 1
+     [4] hello_nucleo2
+   🔄 受信データをマイコンに転送中...
+[INFO] [1755525463.373385033] [PC2]: マイコン nucleo2 にデータ送信: 5個の要素
+[WARN] [1755525463.373391214] [PC2]: マイコン nucleo2 がローカルで見つからません。他のノードを検索中...
+[ERROR] [1755525463.373398488] [PC2]: ❌ マイコン nucleo2 がネットワーク内で見つかりません
+   ❌ マイコンへの転送失敗
+[INFO] [1755525465.373657386] [PC2]: リクエスト受信 - Type: 10, Source: PC1, Dest: nucleo3, TID: 465141
+[INFO] [1755525465.374386577] [PC2]: ノード PC2 に転送
+
+📨 [ノード通信受信] PC1 から:
+   タイプ: 10
+   宛先: nucleo3
+   TID: 465141
+   メッセージ: マイコン転送要求
+   受信データ配列 (5個):
+     [0] 2
+     [1] PC1
+     [2] nucleo3
+     [3] 1
+     [4] hello_nucleo3
+   🔄 受信データをマイコンに転送中...
+[INFO] [1755525465.374452481] [PC2]: マイコン nucleo3 にデータ送信: 5個の要素
+[WARN] [1755525465.374459024] [PC2]: マイコン nucleo3 がローカルで見つからません。他のノードを検索中...
+[ERROR] [1755525465.374468752] [PC2]: ❌ マイコン nucleo3 がネットワーク内で見つかりません
+   ❌ マイコンへの転送失敗
+[INFO] [1755525476.090851486] [rclcpp]: signal_handler(signum=15)
+
+👋 PC2システム終了
+[INFO] [1755525476.092009298] [device0_node]: Stopped receiving data
+[INFO] [1755525476.092029707] [PC2]: 統合通信システムが停止しました。
+[INFO] [1755525476.093544586] [device0_node]: Serial port closed

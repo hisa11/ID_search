@@ -1,30 +1,46 @@
 #include "service.hpp"
 #include <rclcpp/rclcpp.hpp>
-#include <chrono>
-#include <thread>
+#include <vector>
+
+// こちらもグローバル変数を用意して、受信データを保持できる
+static std::vector<std::string> received_microcontrollers_from_server;
 
 int main(int argc, char *argv[])
 {
     rclcpp::init(argc, argv);
 
-    // クライアントIDとサービス名を指定してクライアントを作成
-    auto client_node = std::make_shared<Client>("add_three_ints_client", "add_three_ints");
+    // ノードを作成。デフォルト名は "PC2"。
+    // ターミナルから `ros2 run my_cpp_pkg service_client_example --ros-args -r __node:=PC3`
+    // のように実行すれば、ノード名を変更して複数起動できる。
+    auto node_pc2 = std::make_shared<Service>("PC2");
 
-    // サービスが利用可能になるまで待機
-    if (!client_node->wait_for_service(std::chrono::seconds(5))) {
-        RCLCPP_ERROR(client_node->get_logger(), "サービスが利用できません。終了します。");
-        rclcpp::shutdown();
-        return 1;
-    }
+    // データ受信時に実行するコールバック関数を定義
+    auto my_client_handler = [&](const std::shared_ptr<my_cpp_pkg::srv::DataExchange::Request> request) {
+        RCLCPP_INFO(node_pc2->get_logger(), "[Client Handler] ブロードキャストリクエストを受信しました！");
+        
+        // Type 1 のリクエストに含まれる文字列配列（送信元の所持マイコンリスト）を処理する
+        if (request->request_type == 1 && !request->string_values.empty()) {
+            RCLCPP_INFO(node_pc2->get_logger(), "[Client Handler] 送信元 (%s) の所持マイコンリスト:", request->message.c_str());
+            
+            // 受信したリストをグローバル変数に保存
+            received_microcontrollers_from_server = request->string_values;
 
-    // サービスにリクエスト送信
-    int64_t a = 10, b = 20, c = 30;
-    if (client_node->send_request(a, b, c)) {
-        RCLCPP_INFO(client_node->get_logger(), "レスポンス: %ld", client_node->get_last_result());
-    } else {
-        RCLCPP_ERROR(client_node->get_logger(), "サービス呼び出しに失敗しました");
-    }
+            // リストの内容をログに出力
+            for(const auto& microcontroller_name : received_microcontrollers_from_server) {
+                RCLCPP_INFO(node_pc2->get_logger(), "[Client Handler]   - %s", microcontroller_name.c_str());
+            }
+        }
+    };
 
+    // 作成したハンドラをノードに登録
+    node_pc2->set_data_handler(my_client_handler);
+
+    // メインスレッドはリクエスト受信待機に専念する
+    RCLCPP_INFO(node_pc2->get_logger(), "ノード '%s' を起動しました。ブロードキャストを待機します...", node_pc2->get_name());
+    
+    // rclcpp::spin() はプログラムをここでブロックし、コールバックが呼ばれるのを待つ
+    rclcpp::spin(node_pc2);
+    
     rclcpp::shutdown();
     return 0;
 }

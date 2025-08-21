@@ -1,22 +1,75 @@
 #include "service.hpp"
 #include <rclcpp/rclcpp.hpp>
+#include <thread>
+#include <vector>
+#include <iostream>
+
+// グローバル変数として受信データを保持
+// 数値用と文字列用の両方を用意するとより良い
+static std::vector<int64_t> received_numeric_values_global;
+static std::vector<std::string> received_string_values_global;
 
 int main(int argc, char *argv[])
 {
     rclcpp::init(argc, argv);
+    std::vector<std::string> pc1_microcontrollers = {"maikon1", "maikon2"};
+    auto node_pc1 = std::make_shared<Service>("PC1", pc1_microcontrollers);
 
-    // サービスIDを指定してサーバーを作成
-    auto service_node = std::make_shared<Service>("add_three_ints");
+    // データ受信時に実行するコールバック関数を定義
+    auto my_data_handler = [&](const std::shared_ptr<my_cpp_pkg::srv::DataExchange::Request> request) {
+        RCLCPP_INFO(node_pc1->get_logger(), "[Main Handler] データを受信しました！ (Type: %ld)", request->request_type);
 
-    // サービスを開始
-    service_node->start();
+        // 受信した数値配列をグローバル変数に保存
+        if (!request->numeric_values.empty()) {
+            // 注意：複数スレッドからアクセスする場合はmutex等での保護が必要になる
+            received_numeric_values_global = request->numeric_values;
+            RCLCPP_INFO(node_pc1->get_logger(), "[Main Handler] 数値 %zu 個を保存しました。", received_numeric_values_global.size());
+        }
 
-    RCLCPP_INFO(service_node->get_logger(), "サービスノードをスピンします");
-    rclcpp::spin(service_node);
+        // 受信した文字列配列をグローバル変数に保存
+        if (!request->string_values.empty()) {
+            received_string_values_global = request->string_values;
+            RCLCPP_INFO(node_pc1->get_logger(), "[Main Handler] 文字列 %zu 個を保存しました。", received_string_values_global.size());
+        }
+    };
 
-    // サービスを停止
-    service_node->stop();
+    // 作成したハンドラをノードに登録
+    node_pc1->set_data_handler(my_data_handler);
 
+    // データ送信処理を別スレッドで実行
+    std::thread process_thread([&]() {
+        std::this_thread::sleep_for(std::chrono::seconds(2)); // 待機時間を短縮
+        RCLCPP_INFO(node_pc1->get_logger(), "[Thread] マイコン所持確認のブロードキャストを開始します。");
+        node_pc1->broadcast_to_all_nodes(1, "ALL", {}, pc1_microcontrollers, "PC1からのマイコン所持確認");
+        
+        std::this_thread::sleep_for(std::chrono::seconds(1)); // 待機時間を短縮
+        RCLCPP_INFO(node_pc1->get_logger(), "[Thread] 蓄積された情報からマイコンの場所を検索します:");
+        
+        // ★★★ 検索処理と結果表示を修正 ★★★
+        std::string key = "maikon2"; // PC1 と PC2 の両方が持っているはず
+        std::vector<std::string> locations = node_pc1->find_microcontroller_locations(key);
+        
+        if (!locations.empty()) {
+            RCLCPP_INFO(node_pc1->get_logger(), "検索結果: '%s' が所属するノード:", key.c_str());
+            for (const auto& node_name : locations) {
+                RCLCPP_INFO(node_pc1->get_logger(), "  - %s", node_name.c_str());
+            }
+        } else {
+            RCLCPP_WARN(node_pc1->get_logger(), "検索結果: '%s' は見つかりませんでした。", key.c_str());
+        }
+    });
+
+    // メインスレッドはエグゼキュータを起動し、コールバック処理（受信）に専念する
+    RCLCPP_INFO(node_pc1->get_logger(), "ノード 'PC1' を起動しました。送受信待機中です...");
+    rclcpp::executors::MultiThreadedExecutor executor;
+    executor.add_node(node_pc1);
+    executor.spin();
+
+    // プログラム終了時にスレッドを合流
+    if (process_thread.joinable()) {
+        process_thread.join();
+    }
+    
     rclcpp::shutdown();
     return 0;
 }

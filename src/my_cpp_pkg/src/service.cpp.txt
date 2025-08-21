@@ -1,158 +1,387 @@
 #include "service.hpp"
+#include <chrono>
+#include <cctype>
+#include <algorithm>
+#include <future>
+#include <thread>
 
-using std::placeholders::_1; // bindで使用するプレースホルダー（第1引数用）
-using std::placeholders::_2; // bindで使用するプレースホルダー（第2引数用）
-using namespace std::chrono_literals; // 時間単位を使えるようにする
+#define ANSI_RED "\033[31m"
+#define ANSI_RESET "\033[0m"
 
-// コンストラクタ：サービスIDを受け取ってノードを初期化
-Service::Service(const std::string &serviceID) 
-    : Node(serviceID), service_id_(serviceID), is_running_(false)
+// コンストラクタ
+Service::Service(const std::string &node_name, const std::vector<std::string> &initial_microcontrollers)
+    : Node(node_name),
+      self_node_name_(node_name),
+      random_engine_(std::chrono::high_resolution_clock::now().time_since_epoch().count()),
+      distribution_(100000, 999999),
+      last_cache_update_(std::chrono::steady_clock::time_point::min())
 {
-    RCLCPP_INFO(this->get_logger(), "サービス '%s' を初期化しました", serviceID.c_str());
-}
+    my_microcontrollers_ = initial_microcontrollers;
 
-// サービスを開始する関数
-void Service::start()
-{
-    if (!is_running_) {
-        // サービスの作成（型：AddThreeInts、名前：サービスID、コールバック関数を登録）
-        service_ = this->create_service<my_cpp_pkg::srv::AddThreeInts>(
-            service_id_,                                                 // サービス名
-            std::bind(&Service::handle_service, this, _1, _2)          // コールバックをbind
-        );
-        is_running_ = true;
-        RCLCPP_INFO(this->get_logger(), "サービス '%s' を開始しました", service_id_.c_str());
-    }
-}
-
-// サービスを停止する関数
-void Service::stop()
-{
-    if (is_running_) {
-        service_.reset(); // サービスオブジェクトをリセット
-        is_running_ = false;
-        RCLCPP_INFO(this->get_logger(), "サービス '%s' を停止しました", service_id_.c_str());
-    }
-}
-
-// サービスの状態を取得する関数
-bool Service::is_running() const
-{
-    return is_running_;
-}
-
-// サービスのコールバック関数：リクエストを受けてレスポンスを返す
-void Service::handle_service(
-    const std::shared_ptr<my_cpp_pkg::srv::AddThreeInts::Request> request,
-    std::shared_ptr<my_cpp_pkg::srv::AddThreeInts::Response> response)
-{
-    response->sum = request->a + request->b + request->c; // 3つの値の足し算を実行してsumに代入
-    
-    RCLCPP_INFO(this->get_logger(), 
-                "[%s] リクエスト: a = %ld, b = %ld, c = %ld",
-                service_id_.c_str(), request->a, request->b, request->c);
-    RCLCPP_INFO(this->get_logger(), 
-                "[%s] 応答: sum = %ld", 
-                service_id_.c_str(), response->sum);
-}
-
-// ========== Client クラスの実装 ==========
-
-// コンストラクタ：クライアントIDとサービス名を受け取ってクライアントを初期化
-Client::Client(const std::string &clientID, const std::string &service_name)
-    : Node(clientID), client_id_(clientID), service_name_(service_name), last_result_(0)
-{
-    // クライアント作成（AddThreeInts型、指定されたサービス名）
-    client_ = this->create_client<my_cpp_pkg::srv::AddThreeInts>(service_name_);
-    
-    RCLCPP_INFO(this->get_logger(), "クライアント '%s' を初期化しました（サービス: %s）", 
-                clientID.c_str(), service_name_.c_str());
-}
-
-// サービスにリクエストを送信（3つの値）
-bool Client::send_request(int64_t a, int64_t b, int64_t c)
-{
-    return send_request_internal(a, b, c);
-}
-
-// サービスにリクエストを送信（4つの値、dは使用されない）
-bool Client::send_request(int64_t a, int64_t b, int64_t c, int64_t d)
-{
-    RCLCPP_WARN(this->get_logger(), "4番目のパラメータ d=%ld は無視されます", d);
-    return send_request_internal(a, b, c);
-}
-
-// 内部的なリクエスト送信処理
-bool Client::send_request_internal(int64_t a, int64_t b, int64_t c)
-{
-    // サービスが利用可能でない場合は失敗
-    if (!is_service_available()) {
-        RCLCPP_ERROR(this->get_logger(), "サービス '%s' が利用できません", service_name_.c_str());
-        return false;
-    }
-    
-    // リクエストオブジェクトを作成し、a、b、cに値を設定
-    auto request = std::make_shared<my_cpp_pkg::srv::AddThreeInts::Request>();
-    request->a = a;
-    request->b = b;
-    request->c = c;
-    
-    RCLCPP_INFO(this->get_logger(), "[%s] リクエスト送信: a=%ld, b=%ld, c=%ld", 
-                client_id_.c_str(), a, b, c);
-    
-    // 非同期でリクエストを送信し、結果（Future）を取得
-    auto result_future = client_->async_send_request(request);
-    
-    // Futureが完了するまで待機（成功したら結果を出力）
-    if (rclcpp::spin_until_future_complete(shared_from_this(), result_future) ==
-        rclcpp::FutureReturnCode::SUCCESS)
+    // ★★★ 自分のマイコン情報を新しいマップ構造で登録 ★★★
+    std::lock_guard<std::mutex> lock(map_mutex_);
+    for (const auto &mc_name : my_microcontrollers_)
     {
-        last_result_ = result_future.get()->sum;
-        RCLCPP_INFO(this->get_logger(), "[%s] 結果: %ld + %ld + %ld = %ld", 
-                    client_id_.c_str(), a, b, c, last_result_);
-        return true;
-    } else {
-        RCLCPP_ERROR(this->get_logger(), "[%s] サービス呼び出しに失敗しました", client_id_.c_str());
-        return false;
+        microcontroller_location_map_[mc_name].push_back(self_node_name_);
     }
-}
 
-// 最後のレスポンス結果を取得
-int64_t Client::get_last_result() const
-{
-    return last_result_;
-}
-
-// サービスが利用可能かチェック
-bool Client::is_service_available()
-{
-    return client_->service_is_ready();
-}
-
-// サービスが利用可能になるまで待機
-bool Client::wait_for_service(std::chrono::seconds timeout)
-{
-    auto start_time = std::chrono::steady_clock::now();
+    server_ = this->create_service<my_cpp_pkg::srv::DataExchange>(
+        self_node_name_,
+        std::bind(&Service::handle_request, this, std::placeholders::_1, std::placeholders::_2));
+    RCLCPP_INFO(this->get_logger(), "ノード '%s' が起動し、サービスリクエストを待機します。", self_node_name_.c_str());
     
-    // サーバーが利用可能になるまで待機（0.1秒ずつ確認）
-    while (!client_->wait_for_service(100ms)) {
-        if (!rclcpp::ok()) {  // 強制終了された場合
-            RCLCPP_ERROR(this->get_logger(), "サービス待機中に中断されました");
-            return false;
+    // 初回キャッシュ更新（非同期で実行）
+    std::thread([this]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500)); // 少し待ってからキャッシュ更新
+        refresh_node_cache();
+    }).detach();
+}
+
+// 外部データハンドラ登録関数
+void Service::set_data_handler(DataHandlerCallback callback)
+{
+    data_handler_callback_ = callback;
+    RCLCPP_INFO(this->get_logger(), "外部データハンドラが登録されました。");
+}
+
+// 外部レスポンスハンドラ登録関数
+void Service::set_response_handler(ResponseHandlerCallback callback)
+{
+    response_handler_callback_ = callback;
+    RCLCPP_INFO(this->get_logger(), "外部レスポンスハンドラが登録されました。");
+}
+
+// リクエスト受信時の処理（最適化版）
+void Service::handle_request(
+    const std::shared_ptr<my_cpp_pkg::srv::DataExchange::Request> request,
+    std::shared_ptr<my_cpp_pkg::srv::DataExchange::Response> response)
+{
+    if (data_handler_callback_)
+        data_handler_callback_(request);
+
+    // Type 1 のリクエストを受信したら、送信元のマイコン情報を学習する
+    if (request->request_type == 1)
+    {
+        const std::string &from_node = request->source_node;
+        const std::vector<std::string> &received_microcontrollers = request->string_values;
+        RCLCPP_DEBUG(this->get_logger(), "Type 1 受信。ノード '%s' からのマイコン情報を学習します。", from_node.c_str());
+
+        // ★★★ マップ更新ロジック（最適化）★★★
+        std::lock_guard<std::mutex> lock(map_mutex_);
+        for (const auto &mc_name : received_microcontrollers)
+        {
+            auto &node_list = microcontroller_location_map_[mc_name];
+            // std::findの代わりにunordered_setベースの重複チェックが理想だが、
+            // 現在の構造を維持しつつ、範囲ベースforループで高速化
+            bool found = false;
+            for (const auto &existing_node : node_list) {
+                if (existing_node == from_node) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                node_list.push_back(from_node);
+                RCLCPP_DEBUG(this->get_logger(), "  - Mapped: %s -> %s (新規追加)", mc_name.c_str(), from_node.c_str());
+            }
         }
         
-        // タイムアウトチェック
-        auto elapsed = std::chrono::steady_clock::now() - start_time;
-        if (elapsed >= timeout) {
-            RCLCPP_ERROR(this->get_logger(), "サービス '%s' の待機がタイムアウトしました", 
-                        service_name_.c_str());
-            return false;
-        }
-        
-        RCLCPP_INFO(this->get_logger(), "サービス '%s' 待機中...", service_name_.c_str());
+        // キャッシュを無効化（新しい情報が追加されたため）
+        cache_valid_.store(false);
     }
-    
-    RCLCPP_INFO(this->get_logger(), "サービス '%s' が利用可能になりました", service_name_.c_str());
-    return true;
+
+    // レスポンスの作成 (これは全Type共通)
+    // 相手が自分の情報を知るために、常に自分のマイコンリストを返す
+    response->response_type = (request->request_type == 1) ? 101 : 102;
+    response->return_node = this->get_name();
+    response->transaction_id = request->transaction_id;
+    response->numeric_values = {};
+    response->string_values = my_microcontrollers_; // 常に自分のリストを返す
 }
 
+// データ送信関数（最適化版）
+void Service::send_custom_request(
+    const std::string &target_node_name,
+    int64_t request_type,
+    const std::string &destination_node,
+    const std::vector<int64_t> &numeric_values,
+    const std::vector<std::string> &string_values,
+    const std::string &message)
+{
+    auto client = get_client(target_node_name);
+
+    // サービス準備状態をキャッシュから確認
+    bool is_ready = false;
+    {
+        std::lock_guard<std::mutex> lock(service_cache_mutex_);
+        auto it = service_ready_cache_.find(target_node_name);
+        if (it != service_ready_cache_.end()) {
+            is_ready = it->second;
+        } else {
+            is_ready = client->service_is_ready();
+            service_ready_cache_[target_node_name] = is_ready;
+        }
+    }
+
+    if (!is_ready)
+    {
+        // ログレベルをDEBUGに下げて遅延を軽減
+        RCLCPP_DEBUG(this->get_logger(), "サービス '%s' はまだ利用できません。", target_node_name.c_str());
+    }
+
+    auto request = std::make_shared<my_cpp_pkg::srv::DataExchange::Request>();
+    request->request_type = request_type;
+    request->source_node = this->self_node_name_;
+    request->destination_node = destination_node;
+    request->transaction_id = distribution_(random_engine_);
+    request->numeric_values = numeric_values;
+    request->string_values = string_values;
+    request->message = message;
+
+    // ログを簡略化（デバッグモードでのみ詳細表示）
+    RCLCPP_DEBUG(this->get_logger(), "リクエスト送信 (TID: %ld, Type: %ld) -> %s", request->transaction_id, request_type, target_node_name.c_str());
+
+    auto response_callback = [this, target_node_name](rclcpp::Client<my_cpp_pkg::srv::DataExchange>::SharedFuture future)
+    {
+        try
+        {
+            auto response = future.get();
+            
+            // サービス成功時にキャッシュを更新
+            {
+                std::lock_guard<std::mutex> lock(service_cache_mutex_);
+                service_ready_cache_[target_node_name] = true;
+            }
+            
+            if (response_handler_callback_)
+                response_handler_callback_(response);
+            
+            // レスポンス受信時にも相手の情報を学習する
+            if (response->response_type == 101)
+            { // Type1への返答である101の場合
+                const std::string &from_node = response->return_node;
+                const std::vector<std::string> &received_microcontrollers = response->string_values;
+                std::lock_guard<std::mutex> lock(map_mutex_);
+                for (const auto &mc_name : received_microcontrollers)
+                {
+                    auto &node_list = microcontroller_location_map_[mc_name];
+                    if (std::find(node_list.begin(), node_list.end(), from_node) == node_list.end())
+                    {
+                        node_list.push_back(from_node);
+                        RCLCPP_DEBUG(this->get_logger(), "  - Mapped(Resp): %s -> %s (新規追加)", mc_name.c_str(), from_node.c_str());
+                    }
+                }
+            }
+        }
+        catch (const std::exception &e)
+        {
+            // サービス失敗時にキャッシュから削除
+            {
+                std::lock_guard<std::mutex> lock(service_cache_mutex_);
+                service_ready_cache_[target_node_name] = false;
+            }
+            RCLCPP_DEBUG(this->get_logger(), "レスポンス受信エラー: %s", e.what());
+        }
+    };
+    client->async_send_request(request, response_callback);
+}
+
+// 動的ブロードキャスト関数（従来版、新しい高速版を推奨）
+void Service::broadcast_to_all_nodes(
+    int64_t request_type,
+    const std::string &destination_node,
+    const std::vector<int64_t> &numeric_values,
+    const std::vector<std::string> &string_values,
+    const std::string &message)
+{
+    // 新しい高速版を使用
+    broadcast_to_all_nodes_fast(request_type, destination_node, numeric_values, string_values, message);
+}
+
+// クライアント取得ヘルパー
+rclcpp::Client<my_cpp_pkg::srv::DataExchange>::SharedPtr Service::get_client(const std::string &service_name)
+{
+    if (clients_.find(service_name) == clients_.end())
+    {
+        clients_[service_name] = this->create_client<my_cpp_pkg::srv::DataExchange>(service_name);
+    }
+    return clients_[service_name];
+}
+
+// ★★★ 検索関数の実装を修正 ★★★
+std::vector<std::string> Service::find_microcontroller_locations(const std::string &microcontroller_name)
+{
+    std::lock_guard<std::mutex> lock(map_mutex_);
+    auto it = microcontroller_location_map_.find(microcontroller_name);
+    if (it != microcontroller_location_map_.end())
+    {
+        return it->second; // ノード名のベクターを返す
+    }
+    return {}; // 見つからなければ空のベクターを返す
+}
+
+// ★★★ 新しい高速化機能 ★★★
+
+// キャッシュを更新する関数
+void Service::refresh_node_cache()
+{
+    auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(cache_mutex_);
+    
+    if (cache_valid_.load() && (now - last_cache_update_) < CACHE_LIFETIME) {
+        return; // キャッシュが有効
+    }
+
+    RCLCPP_DEBUG(this->get_logger(), "ノードキャッシュを更新中...");
+    
+    std::vector<std::string> target_nodes = discover_target_nodes();
+    cached_target_nodes_ = std::move(target_nodes);
+    last_cache_update_ = now;
+    cache_valid_.store(true);
+    
+    RCLCPP_DEBUG(this->get_logger(), "ノードキャッシュ更新完了: %zu ノード", cached_target_nodes_.size());
+}
+
+// ノード発見の内部実装
+std::vector<std::string> Service::discover_target_nodes()
+{
+    std::vector<std::string> all_node_names_with_slash = this->get_node_names();
+    std::string target_service_type = "my_cpp_pkg/srv/DataExchange";
+    std::vector<std::string> target_nodes;
+    
+    // unordered_setを使って重複チェックを高速化
+    std::unordered_set<std::string> processed_nodes;
+
+    for (const auto &node_name_with_slash : all_node_names_with_slash)
+    {
+        std::string node_name = node_name_with_slash;
+        // 先頭に / があれば取り除く
+        if (!node_name.empty() && node_name[0] == '/')
+        {
+            node_name = node_name.substr(1);
+        }
+
+        // 自分自身には送信しない
+        if (node_name == this->self_node_name_ || processed_nodes.count(node_name))
+        {
+            continue;
+        }
+
+        if (node_name.empty())
+        {
+            continue;
+        }
+        
+        // 文字チェックを簡略化
+        bool valid = true;
+        for (char c : node_name)
+        {
+            if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_')
+            {
+                valid = false;
+                break;
+            }
+        }
+        
+        if (!valid) {
+            continue;
+        }
+
+        processed_nodes.insert(node_name);
+
+        try
+        {
+            // APIにはスラッシュなしの名前を渡す
+            auto services_map = this->get_service_names_and_types_by_node(node_name, "");
+            for (const auto &pair : services_map)
+            {
+                for (const auto &type : pair.second)
+                {
+                    // サービス名はスラッシュ付きで比較
+                    if (type == target_service_type && pair.first == "/" + node_name)
+                    {
+                        target_nodes.push_back(node_name);
+                        goto next_node_loop;
+                    }
+                }
+            }
+        }
+        catch (const rclcpp::exceptions::RCLError &e)
+        {
+            RCLCPP_DEBUG(this->get_logger(), "ノード '%s' のサービス取得中にエラー: %s", node_name.c_str(), e.what());
+        }
+
+    next_node_loop:;
+    }
+
+    return target_nodes;
+}
+
+// キャッシュされたノードリストを使った高速ブロードキャスト
+void Service::broadcast_to_all_nodes_fast(
+    int64_t request_type,
+    const std::string &destination_node,
+    const std::vector<int64_t> &numeric_values,
+    const std::vector<std::string> &string_values,
+    const std::string &message)
+{
+    RCLCPP_DEBUG(this->get_logger(), "高速ブロードキャストを開始...");
+
+    // キャッシュを必要に応じて更新
+    refresh_node_cache();
+
+    std::vector<std::string> target_nodes;
+    {
+        std::lock_guard<std::mutex> lock(cache_mutex_);
+        target_nodes = cached_target_nodes_;
+    }
+
+    if (target_nodes.empty())
+    {
+        RCLCPP_WARN(this->get_logger(), "ブロードキャスト対象のノードが見つかりませんでした。");
+        return;
+    }
+
+    RCLCPP_INFO(this->get_logger(), "高速ブロードキャスト実行！ 宛先: %zu ノード", target_nodes.size());
+
+    // 並列送信を実行
+    send_requests_parallel(target_nodes, request_type, destination_node, numeric_values, string_values, message);
+}
+
+// 並列送信の内部実装
+void Service::send_requests_parallel(
+    const std::vector<std::string> &target_nodes,
+    int64_t request_type,
+    const std::string &destination_node,
+    const std::vector<int64_t> &numeric_values,
+    const std::vector<std::string> &string_values,
+    const std::string &message)
+{
+    // 小さなバッチに分けて並列処理
+    const size_t batch_size = 4; // 4つずつ並列処理
+    
+    for (size_t i = 0; i < target_nodes.size(); i += batch_size)
+    {
+        std::vector<std::future<void>> futures;
+        
+        size_t end = std::min(i + batch_size, target_nodes.size());
+        for (size_t j = i; j < end; ++j)
+        {
+            const auto &target_node_name = target_nodes[j];
+            
+            // 各送信を非同期で実行
+            auto future = std::async(std::launch::async, [this, target_node_name, request_type, destination_node, numeric_values, string_values, message]() {
+                RCLCPP_DEBUG(this->get_logger(), " -> %s", target_node_name.c_str());
+                send_custom_request(target_node_name, request_type, destination_node, numeric_values, string_values, message);
+            });
+            
+            futures.push_back(std::move(future));
+        }
+        
+        // このバッチの完了を待つ
+        for (auto &future : futures)
+        {
+            future.wait();
+        }
+    }
+}

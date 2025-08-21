@@ -1,0 +1,131 @@
+
+╔══════════════════════════════════════╗
+║         PC1 統合通信システム         ║
+║ マイコン: nucleo1                    ║
+║ 機能: メイン制御、転送処理           ║
+║ ボーレート: 115200 bps               ║
+╚══════════════════════════════════════╝
+[INFO] [1755529439.227018991] [SerialCommunication]: Scanning for serial devices...
+[INFO] [1755529439.227055070] [SerialCommunication]: Trying to connect to /dev/ttyACM0
+[INFO] [1755529439.229469727] [device0_node]: SerialCommunication node created
+[INFO] [1755529439.229514482] [device0_node]: Port: /dev/ttyACM0, Delimiter: '|'
+[ERROR] [1755529439.229542695] [device0_node]: Failed to open serial port: /dev/ttyACM0
+[WARN] [1755529439.229562523] [SerialCommunication]: Failed to connect to /dev/ttyACM0
+[INFO] [1755529439.231169546] [SerialCommunication]: Trying to connect to /dev/ttyACM1
+[INFO] [1755529439.233518448] [device0_node]: SerialCommunication node created
+[INFO] [1755529439.233555589] [device0_node]: Port: /dev/ttyACM1, Delimiter: '|'
+[ERROR] [1755529439.233576929] [device0_node]: Failed to open serial port: /dev/ttyACM1
+[WARN] [1755529439.233593010] [SerialCommunication]: Failed to connect to /dev/ttyACM1
+[INFO] [1755529439.234849497] [SerialCommunication]: Trying to connect to /dev/ttyACM2
+[INFO] [1755529439.236614570] [device0_node]: SerialCommunication node created
+[INFO] [1755529439.236637153] [device0_node]: Port: /dev/ttyACM2, Delimiter: '|'
+[ERROR] [1755529439.236654095] [device0_node]: Failed to open serial port: /dev/ttyACM2
+[WARN] [1755529439.236662922] [SerialCommunication]: Failed to connect to /dev/ttyACM2
+[INFO] [1755529439.237770216] [SerialCommunication]: Trying to connect to /dev/ttyACM3
+[INFO] [1755529439.239836581] [device0_node]: SerialCommunication node created
+[INFO] [1755529439.239876617] [device0_node]: Port: /dev/ttyACM3, Delimiter: '|'
+[ERROR] [1755529439.239898840] [device0_node]: Failed to open serial port: /dev/ttyACM3
+[WARN] [1755529439.239910552] [SerialCommunication]: Failed to connect to /dev/ttyACM3
+[INFO] [1755529439.241110311] [SerialCommunication]: Trying to connect to /dev/ttyUSB0
+[INFO] [1755529439.242824107] [device0_node]: SerialCommunication node created
+[INFO] [1755529439.242840839] [device0_node]: Port: /dev/ttyUSB0, Delimiter: '|'
+[ERROR] [1755529439.242852892] [device0_node]: Failed to open serial port: /dev/ttyUSB0
+[WARN] [1755529439.242860626] [SerialCommunication]: Failed to connect to /dev/ttyUSB0
+[INFO] [1755529439.243850607] [SerialCommunication]: Trying to connect to /dev/ttyUSB1
+[INFO] [1755529439.245948552] [device0_node]: SerialCommunication node created
+[INFO] [1755529439.245987176] [device0_node]: Port: /dev/ttyUSB1, Delimiter: '|'
+[ERROR] [1755529439.246012965] [device0_node]: Failed to open serial port: /dev/ttyUSB1
+[WARN] [1755529439.246024978] [SerialCommunication]: Failed to connect to /dev/ttyUSB1
+[INFO] [1755529439.247174331] [SerialCommunication]: Trying to connect to /dev/ttyUSB2
+[INFO] [1755529439.249186684] [device0_node]: SerialCommunication node created
+[INFO] [1755529439.249223434] [device0_node]: Port: /dev/ttyUSB2, Delimiter: '|'
+[ERROR] [1755529439.249257078] [device0_node]: Failed to open serial port: /dev/ttyUSB2
+[WARN] [1755529439.249269261] [SerialCommunication]: Failed to connect to /dev/ttyUSB2
+[INFO] [1755529439.250667047] [SerialCommunication]: Trying to connect to /dev/ttyUSB3
+[INFO] [1755529439.252561626] [device0_node]: SerialCommunication node created
+[INFO] [1755529439.252589619] [device0_node]: Port: /dev/ttyUSB3, Delimiter: '|'
+[ERROR] [1755529439.252607874] [device0_node]: Failed to open serial port: /dev/ttyUSB3
+[WARN] [1755529439.252616971] [SerialCommunication]: Failed to connect to /dev/ttyUSB3
+[ERROR] [1755529439.253772747] [SerialCommunication]: No devices connected
+[INFO] [1755529439.253821980] [create_system]: シリアル自動検出: ボーレート 115200 bps で 0個のデバイスを発見
+[INFO] [1755529439.256758128] [PC1]: [32m統合通信システム 'PC1' が起動しました。[0m
+[INFO] [1755529439.256779980] [PC1]: マイコン: 1個, シリアルデバイス: 0個
+[INFO] [1755529439.256790580] [create_system]: [32m統合システム作成完了: PC1 (マイコン: 1個, シリアル: 0個, ボーレート: 115200)[0m
+[INFO] [1755529439.256803955] [PC1]: データハンドラが登録されました。
+[INFO] [1755529439.256812361] [PC1]: シリアルデータハンドラが登録されました。
+
+⚡ システム起動中...
+ROS2サービス通信とシリアル通信を同時監視
+
+⏳ システム初期化待機中...
+
+🚀 === 初期化シーケンス開始 ===
+[INFO] [1755529442.256997073] [PC1]: [34m=== 統合システム初期化開始 ===[0m
+[INFO] [1755529442.257113223] [PC1]: [34mフェーズ1: マイコンID探索[0m
+[INFO] [1755529442.257130226] [PC1]: [33mマイコンID探索を開始します（タイムアウト: 2000ms）[0m
+[INFO] [1755529442.257163900] [PC1]: すべてのマイコンからレスポンスを受信しました。
+[INFO] [1755529442.257177916] [PC1]: [32mマイコンID探索完了: 0個のマイコンを発見[0m
+[INFO] [1755529442.257190390] [PC1]: 20ms待機中...
+[INFO] [1755529442.277282720] [PC1]: [34mフェーズ2: ノード探索とマッピング[0m
+[INFO] [1755529442.277336172] [PC1]: [33mノード探索とマッピングを開始します（タイムアウト: 3000ms）[0m
+[INFO] [1755529442.730550057] [PC1]: すべてのノードからレスポンスを受信しました。
+[INFO] [1755529442.730613728] [PC1]: [32mノードマッピング完了: 0個のノードを発見[0m
+[INFO] [1755529442.730646370] [PC1]: [32m=== 統合システム初期化完了 ===[0m
+[INFO] [1755529442.730656510] [PC1]: 発見されたマイコン: 0個
+[INFO] [1755529442.730665306] [PC1]: 発見されたノード: 0個
+[INFO] [1755529442.730672069] [PC1]: システムが通信可能状態になりました。
+
+✅ システム初期化完了！通信テストを開始します。
+
+📋 [テスト1] マイコン制御コマンド送信
+送信データ (配列): [GET_SENSOR] [temperature] [humidity] [pressure] 
+[INFO] [1755529444.730809419] [PC1]: マイコン nucleo1 にデータ送信: 4個の要素
+[WARN] [1755529444.730883580] [PC1]: マイコン nucleo1 がローカルで見つからません。他のノードを検索中...
+[ERROR] [1755529444.730929888] [PC1]: ❌ マイコン nucleo1 がネットワーク内で見つかりません
+❌ マイコンへのコマンド送信失敗
+
+📋 [テスト2] PC2へのタスク送信
+送信データ (配列): [EXECUTE_TASK] [motion_control] [speed:50] [direction:forward] 
+[INFO] [1755529447.731074860] [PC1]: ノード PC2 (宛先マイコン: nucleo2) にデータ送信
+[INFO] [1755529447.733810237] [PC1]: ノード PC2 への送信完了 (TID: 920207)
+✅ PC2への送信成功
+   (配列のままROS2サービス経由で送信)
+[INFO] [1755529447.735462325] [PC1]: ノード PC2 からレスポンス受信 (TID: 920207)
+
+📋 [テスト3] データ収集コマンド
+[INFO] [1755529450.733990072] [PC1]: マイコン nucleo1 にデータ送信: 4個の要素
+[WARN] [1755529450.734039395] [PC1]: マイコン nucleo1 がローカルで見つからません。他のノードを検索中...
+[ERROR] [1755529450.734065856] [PC1]: ❌ マイコン nucleo1 がネットワーク内で見つかりません
+✅ データ収集コマンド送信完了
+
+📋 [テスト4] ID2モードで「asagohan」送信（自動転送機能）
+送信データ (ID2フォーマット): [2] [PC1] [nucleo1] [1] [asagohan] 
+実際の送信: 2,PC1,nucleo1,1,asagohan|
+💡 注意: nucleo1が他のPC（PC2等）に接続されている場合、自動的に転送されます
+[INFO] [1755529453.734213176] [PC1]: マイコン nucleo1 にデータ送信: 5個の要素
+[WARN] [1755529453.734275314] [PC1]: マイコン nucleo1 がローカルで見つからません。他のノードを検索中...
+[ERROR] [1755529453.734299530] [PC1]: ❌ マイコン nucleo1 がネットワーク内で見つかりません
+❌ 送信失敗（nucleo1がネットワーク内で見つかりません）
+
+📋 [テスト5] 様々なマイコンへの自動転送テスト
+📤 nucleo2に送信テスト: hello_nucleo2
+[INFO] [1755529456.734444431] [PC1]: マイコン nucleo2 にデータ送信: 5個の要素
+[WARN] [1755529456.734507341] [PC1]: マイコン nucleo2 がローカルで見つからません。他のノードを検索中...
+[ERROR] [1755529456.734536987] [PC1]: ❌ マイコン nucleo2 がネットワーク内で見つかりません
+⚠️  nucleo2が見つかりません（正常: PC1にnucleo2は接続されていません）
+📤 nucleo3に送信テスト: hello_nucleo3
+[INFO] [1755529458.734678508] [PC1]: マイコン nucleo3 にデータ送信: 5個の要素
+[WARN] [1755529458.734755875] [PC1]: マイコン nucleo3 がローカルで見つからません。他のノードを検索中...
+[ERROR] [1755529458.734778759] [PC1]: ❌ マイコン nucleo3 がネットワーク内で見つかりません
+⚠️  nucleo3が見つかりません（正常: PC1にnucleo3は接続されていません）
+
+🎯 === 全テスト完了 ===
+💡 転送テストのために以下のデータをマイコンから送信してください:
+   ノード転送: FORWARD_TO_NODE,PC2,sensor_data,25.6,60.2|
+   マイコン転送: FORWARD_TO_MICROCONTROLLER,nucleo2,control_cmd,start|
+
+🔄 継続的な通信監視中...
+[INFO] [1755529479.066208964] [rclcpp]: signal_handler(signum=15)
+
+👋 PC1システム終了
+[INFO] [1755529479.067349079] [PC1]: 統合通信システムが停止しました。

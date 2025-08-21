@@ -1,23 +1,5 @@
 #include "serial.hpp"
 #include <chrono>
-#include <sstream> // std::stringstream のために追加
-
-speed_t convert_baudrate(const std::string& baudrate_str) {
-    try {
-        int baudrate = std::stoi(baudrate_str);
-        switch (baudrate) {
-            case 9600:    return B9600;
-            case 19200:   return B19200;
-            case 38400:   return B38400;
-            case 57600:   return B57600;
-            case 115200:  return B115200;
-            case 230400:  return B230400;
-            default:      return B115200;
-        }
-    } catch (const std::exception& e) {
-        return B115200; // 変換失敗時はデフォルト
-    }
-}
 
 SerialCommunication::SerialCommunication(const std::string& node_name, 
                                        const std::string& port, 
@@ -225,7 +207,7 @@ std::vector<std::string> SerialCommunication::extract_messages() {
     size_t pos = 0;
     
     while ((pos = receive_buffer_.find(delimiter_)) != std::string::npos) {
-        std::string message = receive_buffer_.substr(0, pos + delimiter_.length()); // 区切り文字も含める
+        std::string message = receive_buffer_.substr(0, pos);
         if (!message.empty()) {
             messages.push_back(message);
             RCLCPP_INFO(this->get_logger(), "Received: '%s'", message.c_str());
@@ -238,16 +220,6 @@ std::vector<std::string> SerialCommunication::extract_messages() {
 
 bool SerialCommunication::isOpen() const {
     return serial_fd_ >= 0;
-}
-
-void SerialCommunication::flushPort() {
-    if (serial_fd_ >= 0) {
-        // 送信バッファをフラッシュ
-        tcflush(serial_fd_, TCIOFLUSH);
-        // 受信バッファもクリア
-        receive_buffer_.clear();
-        RCLCPP_INFO(this->get_logger(), "シリアルポートをフラッシュしました: %s", port_.c_str());
-    }
 }
 
 // 静的メソッド: 指定されたポートリストからデバイスをスキャンして接続
