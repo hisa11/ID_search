@@ -40,7 +40,7 @@ int main(int argc, char *argv[])
         auto start_time = std::chrono::high_resolution_clock::now();
 
         for (int i = 0; i < NUM_REQUESTS; ++i) {
-            std::vector<std::string> data = {"2", "PC2", "nucleo1", "1", "apple" + std::to_string(i)};
+            std::vector<std::string> data = {"2", "PC2", "nucleo2", "1", "apple" + std::to_string(i)};
             // ★★★ ここで正しく sendToNodeAsync を呼び出す ★★★
              system->sendToNodeAsync("PC1", "nucleo1", data, "高速送信", 0);
             std::this_thread::sleep_for(std::chrono::milliseconds(5));

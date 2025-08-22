@@ -52,6 +52,10 @@ private:
     bool sendToMicrocontroller(const std::string& microcontroller_id, const std::string& data);
     rclcpp::Client<my_cpp_pkg::srv::DataExchange>::SharedPtr get_client(const std::string& service_name);
     int64_t generate_transaction_id();
+    
+    // マイコン間通信中継機能
+    void setupAutomaticMicrocontrollerRelay();
+    void handleMicrocontrollerToMicrocontrollerMessage(const std::shared_ptr<my_cpp_pkg::srv::DataExchange::Request> request);
 
     std::string self_node_name_;
     std::vector<std::shared_ptr<SerialCommunication>> serial_comms_;
@@ -61,6 +65,10 @@ private:
     
     std::unordered_map<int64_t, std::string> pending_forward_map_;
     std::mutex forward_map_mutex_;
+    
+    // マイコン間通信中継用
+    std::unordered_map<int64_t, std::string> microcontroller_pending_map_;
+    std::mutex microcontroller_relay_mutex_;
     
     std::vector<std::string> discovered_microcontrollers_;
     std::unordered_map<std::string, std::shared_ptr<SerialCommunication>> microcontroller_device_map_;

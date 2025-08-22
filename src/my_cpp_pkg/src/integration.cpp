@@ -22,6 +22,9 @@ IntegratedCommunicationSystem::IntegratedCommunicationSystem(
         dev->startReceiving();
     }
     worker_thread_ = std::thread([this](){ this->processRequestQueue(); });
+    
+    // 自動マイコン間通信中継機能を有効化
+    setupAutomaticMicrocontrollerRelay();
 }
 
 IntegratedCommunicationSystem::~IntegratedCommunicationSystem()
@@ -194,33 +197,59 @@ void IntegratedCommunicationSystem::handle_serial_data(const std::string& device
         return;
     }
 
-    // 通常応答: "102,PC2,TID,0"
+    // 通常応答: "102,PC2,TID,0" またはマイコン間通信応答
     if (parts.size() >= 4 && parts[0] == "102") {
         try {
             int64_t tid = std::stoll(parts[2]);
-            std::string original_sender; // これはPC2のはず
+            std::string original_sender;
+            
+            // まずPC経由の通信をチェック
             {
                 std::lock_guard<std::mutex> lock(forward_map_mutex_);
                 if (pending_forward_map_.count(tid)) {
                     original_sender = pending_forward_map_[tid];
                     pending_forward_map_.erase(tid);
+                    
+                    RCLCPP_INFO(this->get_logger(), "TID %ld の応答を %s に転送します。", tid, original_sender.c_str());
+                    
+                    std::vector<std::string> response_data(parts.begin(), parts.end());
+                    RCLCPP_INFO(this->get_logger(), "応答データ: %s", 
+                        std::accumulate(response_data.begin(), response_data.end(), std::string(),
+                            [](const std::string& a, const std::string& b) { return a.empty() ? b : a + "," + b; }).c_str());
+                    sendToNodeAsync(original_sender, "PC2", response_data, "マイコンからの応答", 102);
+                    return;
                 }
             }
-
-            if (!original_sender.empty()) {
-                RCLCPP_INFO(this->get_logger(), "TID %ld の応答を %s に転送します。", tid, original_sender.c_str());
-
-                // ★★★ ここで正しく sendToNodeAsync を呼び出す ★★★
-                // PC2に応答を送り返す
-                std::vector<std::string> response_data(parts.begin(), parts.end());
-                RCLCPP_INFO(this->get_logger(), "応答データ: %s", 
-                    std::accumulate(response_data.begin(), response_data.end(), std::string(),
-                        [](const std::string& a, const std::string& b) { return a.empty() ? b : a + "," + b; }).c_str());
-                sendToNodeAsync(original_sender, "PC2", response_data, "マイコンからの応答", 102);
-
-            } else {
-                RCLCPP_WARN(this->get_logger(), "TID %ld に対する待機中の要求が見つかりません", tid);
+            
+            // マイコン間通信の応答をチェック
+            {
+                std::lock_guard<std::mutex> lock(microcontroller_relay_mutex_);
+                if (microcontroller_pending_map_.count(tid)) {
+                    original_sender = microcontroller_pending_map_[tid];
+                    microcontroller_pending_map_.erase(tid);
+                    
+                    RCLCPP_INFO(this->get_logger(), "🔄 マイコン間通信応答を %s に転送: TID %ld", 
+                                original_sender.c_str(), tid);
+                    
+                    // 応答を元のマイコンに送信
+                    std::stringstream response_message;
+                    for (size_t i = 0; i < parts.size(); ++i) {
+                        if (i > 0) response_message << ",";
+                        response_message << parts[i];
+                    }
+                    response_message << "|";
+                    
+                    bool sent = sendToMicrocontroller(original_sender, response_message.str());
+                    if (sent) {
+                        RCLCPP_INFO(this->get_logger(), "✅ マイコン間通信応答転送成功: %s", original_sender.c_str());
+                    } else {
+                        RCLCPP_ERROR(this->get_logger(), "❌ マイコン間通信応答転送失敗: %s", original_sender.c_str());
+                    }
+                    return;
+                }
             }
+            
+            RCLCPP_WARN(this->get_logger(), "TID %ld に対する待機中の要求が見つかりません", tid);
         } catch (const std::exception& e) {
             RCLCPP_ERROR(this->get_logger(), "TIDの解析に失敗: %s", e.what());
         }
@@ -248,6 +277,80 @@ void IntegratedCommunicationSystem::handle_serial_data(const std::string& device
 }
 
 int64_t IntegratedCommunicationSystem::generate_transaction_id() { return distribution_(random_engine_); }
+
+void IntegratedCommunicationSystem::setupAutomaticMicrocontrollerRelay() {
+    // 自動マイコン間通信中継のためのデータハンドラーを設定
+    setDataHandler([this](const std::shared_ptr<my_cpp_pkg::srv::DataExchange::Request> request) {
+        this->handleMicrocontrollerToMicrocontrollerMessage(request);
+    });
+    RCLCPP_INFO(this->get_logger(), "🔗 自動マイコン間通信中継機能を有効化しました");
+}
+
+void IntegratedCommunicationSystem::handleMicrocontrollerToMicrocontrollerMessage(
+    const std::shared_ptr<my_cpp_pkg::srv::DataExchange::Request> request) {
+    
+    const auto& data = request->string_values;
+    if (data.size() < 4) {
+        RCLCPP_WARN(this->get_logger(), "マイコンからの不正なメッセージ形式: データ不足");
+        return;
+    }
+    
+    std::string message_type = data[0];
+    // メッセージ内の実際の送信者を使用
+    std::string source_mc = data[1];
+    std::string destination_mc = data[2];
+    
+    RCLCPP_INFO(this->get_logger(), "🔄 マイコン間通信を検出: %s → %s (タイプ: %s)", 
+                source_mc.c_str(), destination_mc.c_str(), message_type.c_str());
+    
+    // 宛先マイコンが存在するかチェック
+    {
+        std::lock_guard<std::mutex> lock(discovery_mutex_);
+        if (microcontroller_device_map_.find(destination_mc) == microcontroller_device_map_.end()) {
+            RCLCPP_WARN(this->get_logger(), "❌ 宛先マイコン '%s' が見つかりません。利用可能なマイコン: %zu個", 
+                        destination_mc.c_str(), microcontroller_device_map_.size());
+            return;
+        }
+    }
+    
+    // 元のマイコンからのメッセージを宛先マイコンに中継
+    // メッセージ形式: "type,source,destination,tid,request_id,data..."
+    // 例: "2,nucleo1,nucleo2,12345,1,apple42"
+    
+    // 新しいTransaction IDを生成して、元のTIDと置き換え
+    int64_t new_transaction_id = generate_transaction_id();
+    
+    std::stringstream relay_message;
+    relay_message << data[0]; // message_type
+    relay_message << "," << data[1]; // source
+    relay_message << "," << data[2]; // destination  
+    relay_message << "," << new_transaction_id; // 新しいTID
+    for (size_t i = 4; i < data.size(); ++i) {
+        relay_message << "," << data[i];
+    }
+    relay_message << "|";
+    
+    // 応答を元のマイコンに返すためのマッピングを保存
+    {
+        std::lock_guard<std::mutex> lock(microcontroller_relay_mutex_);
+        microcontroller_pending_map_[new_transaction_id] = source_mc;
+    }
+    
+    RCLCPP_INFO(this->get_logger(), "📤 マイコン %s にメッセージ中継: %s", 
+                destination_mc.c_str(), relay_message.str().c_str());
+    
+    bool sent = sendToMicrocontroller(destination_mc, relay_message.str());
+    if (sent) {
+        RCLCPP_INFO(this->get_logger(), "✅ マイコン間通信中継成功: %s → %s (TID: %s → %s)", 
+                    source_mc.c_str(), destination_mc.c_str(), data[3].c_str(), std::to_string(new_transaction_id).c_str());
+    } else {
+        RCLCPP_ERROR(this->get_logger(), "❌ マイコン間通信中継失敗: %s → %s", 
+                     source_mc.c_str(), destination_mc.c_str());
+        // 失敗時はマッピングを削除
+        std::lock_guard<std::mutex> lock(microcontroller_relay_mutex_);
+        microcontroller_pending_map_.erase(new_transaction_id);
+    }
+}
 
 rclcpp::Client<my_cpp_pkg::srv::DataExchange>::SharedPtr IntegratedCommunicationSystem::get_client(const std::string &service_name) {
     if (clients_.find(service_name) == clients_.end()) {
