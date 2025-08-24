@@ -7,9 +7,12 @@
 int main(int argc, char *argv[])
 {
     rclcpp::init(argc, argv);
-    auto system = create_integrated_system("PC1", true, 115200);
+    
+    // 自動探索を有効にしてシステムを作成 (第4引数が true または省略で有効)
+    auto system = create_integrated_system("PC1", true, 115200, true);
 
-    std::cout << "\nPC1 高速非同期サーバー 起動。PC2からのリクエストを待機中..." << std::endl;
+    std::cout << "\nPC1 高速非同期サーバー 起動。" << std::endl;
+    std::cout << "バックグラウンドで自動探索を開始します..." << std::endl;
 
     // エグゼキューターのセットアップ
     rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 4);
@@ -17,25 +20,9 @@ int main(int argc, char *argv[])
     for(const auto& dev : system->getSerialDevices()) {
         executor.add_node(dev);
     }
-
-    // バックグラウンドでID探索を実行（detachして独立実行）
-    std::thread init_thread([&]() {
-        // std::this_thread::sleep_for(std::chrono::seconds(1)); // エグゼキューター起動を待つ
-        RCLCPP_INFO(system->get_logger(), "=== マイコンID探索を開始 ===");
-        auto discovered = system->discoverMicrocontrollerIDs(3000);
-        RCLCPP_INFO(system->get_logger(), "=== ID探索完了。発見されたマイコン: %zu個 ===", discovered.size());
-        
-        if (!discovered.empty()) {
-            RCLCPP_INFO(system->get_logger(), "発見されたマイコンID:");
-            for (const auto& mc_id : discovered) {
-                RCLCPP_INFO(system->get_logger(), "  - %s", mc_id.c_str());
-            }
-        } else {
-            RCLCPP_WARN(system->get_logger(), "マイコンが発見されませんでした。マイコンのプログラムが正しく動作しているか確認してください。");
-        }
-        RCLCPP_INFO(system->get_logger(), "=== 待機モードです。マイコン間通信とPC間通信の準備完了 ===");
-    });
-    init_thread.detach(); // スレッドを独立実行
+    
+    // 自動探索は IntegratedCommunicationSystem のコンストラクタ内で
+    // バックグラウンドスレッドとして開始されるため、ここでの手動実行は不要です。
 
     // メインループ（Ctrl+Cで終了）
     executor.spin();

@@ -2,11 +2,13 @@
 #include <chrono>
 #include <sstream>
 #include <algorithm>
+#include <numeric>
 
+// コンストラクタ: 自動探索フラグを受け取り、有効なら探索スレッドを開始
 IntegratedCommunicationSystem::IntegratedCommunicationSystem(
-    const std::string& node_name, const std::vector<std::shared_ptr<SerialCommunication>>& serial_comms)
+    const std::string& node_name, const std::vector<std::shared_ptr<SerialCommunication>>& serial_comms, bool auto_discover)
     : rclcpp::Node(node_name), self_node_name_(node_name), serial_comms_(serial_comms),
-      shutdown_flag_(false),
+      shutdown_flag_(false), auto_discover_enabled_(auto_discover),
       random_engine_(std::chrono::high_resolution_clock::now().time_since_epoch().count()),
       distribution_(1, INT64_MAX)
 {
@@ -21,6 +23,14 @@ IntegratedCommunicationSystem::IntegratedCommunicationSystem(
         dev->startReceiving();
     }
     worker_thread_ = std::thread([this](){ this->processRequestQueue(); });
+    
+    setupAutomaticMicrocontrollerRelay();
+
+    // 自動探索機能が有効な場合、バックグラウンドで探索を開始
+    if (auto_discover_enabled_) {
+        std::thread discovery_thread(&IntegratedCommunicationSystem::startAutoDiscovery, this, 2000, 3000);
+        discovery_thread.detach();
+    }
 }
 
 IntegratedCommunicationSystem::~IntegratedCommunicationSystem()
@@ -55,13 +65,22 @@ std::vector<std::string> IntegratedCommunicationSystem::getDiscoveredMicrocontro
     return discovered_microcontrollers_;
 }
 
+// 新規: ネットワーク全体のノードとマイコンのマップを取得
+std::map<std::string, std::vector<std::string>> IntegratedCommunicationSystem::getNetworkMicrocontrollerMap() const {
+    std::lock_guard<std::mutex> lock(node_map_mutex_);
+    return node_to_microcontrollers_map_;
+}
+
 // ★★★ 非同期送信の実装をこのシグネチャに統一 ★★★
 void IntegratedCommunicationSystem::sendToNodeAsync(
     const std::string& target_node, const std::string& final_destination,
     const std::vector<std::string>& data, const std::string& message, int64_t request_type)
 {
     auto client = get_client(target_node);
-    if (!client->service_is_ready()) { return; }
+    if (!client->service_is_ready()) { 
+        RCLCPP_ERROR(this->get_logger(), "サービス %s が準備されていません", target_node.c_str());
+        return; 
+    }
 
     auto request = std::make_shared<my_cpp_pkg::srv::DataExchange::Request>();
     request->request_type = request_type;
@@ -70,7 +89,12 @@ void IntegratedCommunicationSystem::sendToNodeAsync(
     request->string_values = data;
     request->transaction_id = generate_transaction_id();
     request->message = message;
+    
+    RCLCPP_INFO(this->get_logger(), "非同期送信開始: %s -> request_type=%ld, data_size=%zu", 
+                target_node.c_str(), request_type, data.size());
+    
     client->async_send_request(request);
+    RCLCPP_INFO(this->get_logger(), "非同期送信完了: %s", target_node.c_str());
 }
 
 bool IntegratedCommunicationSystem::sendToMicrocontroller(const std::string& microcontroller_id, const std::string& data) {
@@ -91,12 +115,40 @@ void IntegratedCommunicationSystem::handle_request(
     const std::shared_ptr<my_cpp_pkg::srv::DataExchange::Request> request,
     std::shared_ptr<my_cpp_pkg::srv::DataExchange::Response> response)
 {
-    {
-        std::lock_guard<std::mutex> lock(queue_mutex_);
-        request_queue_.push(request);
+    RCLCPP_INFO(this->get_logger(), "🔍 サービスリクエスト受信: source=%s, request_type=%ld, data_size=%zu", 
+                request->source_node.c_str(), request->request_type, request->string_values.size());
+                
+    if (request->request_type == 1) {
+        RCLCPP_INFO(this->get_logger(), "📋 マイクロコントローラーリスト要求を処理中...");
+        
+        auto microcontroller_list = getDiscoveredMicrocontrollers();
+        response->string_values = microcontroller_list;
+        response->response_type = 101; // Info Response
+        response->return_node = self_node_name_;
+        response->transaction_id = request->transaction_id;
+        
+        RCLCPP_INFO(this->get_logger(), "✅ マイクロコントローラーリスト応答: %zu個", microcontroller_list.size());
+        for (size_t i = 0; i < microcontroller_list.size(); ++i) {
+            RCLCPP_INFO(this->get_logger(), "  🔌 [%zu] %s", i, microcontroller_list[i].c_str());
+        }
+        return;
     }
-    queue_cv_.notify_one();
-    response->response_type = 200; // Accepted
+    
+    if (request->request_type == 102) {
+        if (data_handler_callback_) {
+            data_handler_callback_(request);
+        } else {
+            RCLCPP_WARN(this->get_logger(), "データハンドラーが設定されていません");
+        }
+    } else {
+        {
+            std::lock_guard<std::mutex> lock(queue_mutex_);
+            request_queue_.push(request);
+        }
+        queue_cv_.notify_one();
+    }
+    
+    response->response_type = 200;
     response->return_node = self_node_name_;
     response->transaction_id = request->transaction_id;
 }
@@ -130,7 +182,9 @@ void IntegratedCommunicationSystem::processRequestQueue()
             pending_forward_map_[request->transaction_id] = request->source_node;
         }
 
-        sendToMicrocontroller(destination_mc, ss.str());
+        RCLCPP_INFO(this->get_logger(), "マイコン %s にデータ送信: %s", destination_mc.c_str(), ss.str().c_str());
+        bool sent = sendToMicrocontroller(destination_mc, ss.str());
+        RCLCPP_INFO(this->get_logger(), "送信結果: %s", sent ? "成功" : "失敗");
     }
 }
 
@@ -144,7 +198,6 @@ void IntegratedCommunicationSystem::handle_serial_data(const std::string& device
     std::string item;
     while(std::getline(ss, item, ',')) parts.push_back(item);
 
-    // ID応答: "101,nucleo1,0"
     if (parts.size() >= 2 && parts[0] == "101") {
         std::string mc_id = parts[1];
         bool newly_discovered = false;
@@ -168,37 +221,97 @@ void IntegratedCommunicationSystem::handle_serial_data(const std::string& device
         return;
     }
 
-    // 通常応答: "102,PC2,TID,0"
     if (parts.size() >= 4 && parts[0] == "102") {
         try {
             int64_t tid = std::stoll(parts[2]);
-            std::string original_sender; // これはPC2のはず
+            std::string original_sender;
             {
                 std::lock_guard<std::mutex> lock(forward_map_mutex_);
                 if (pending_forward_map_.count(tid)) {
                     original_sender = pending_forward_map_[tid];
                     pending_forward_map_.erase(tid);
+                    
+                    std::vector<std::string> response_data(parts.begin(), parts.end());
+                    sendToNodeAsync(original_sender, "PC2", response_data, "マイコンからの応答", 102);
+                    return;
                 }
             }
-
-            if (!original_sender.empty()) {
-                RCLCPP_INFO(this->get_logger(), "TID %ld の応答を %s に転送します。", tid, original_sender.c_str());
-
-                // ★★★ ここで正しく sendToNodeAsync を呼び出す ★★★
-                // PC2に応答を送り返す
-                std::vector<std::string> response_data(parts.begin(), parts.end());
-                sendToNodeAsync(original_sender, "PC2", response_data, "マイコンからの応答", 102);
-
-            } else {
-                RCLCPP_WARN(this->get_logger(), "TID %ld に対する待機中の要求が見つかりません", tid);
+            {
+                std::lock_guard<std::mutex> lock(microcontroller_relay_mutex_);
+                if (microcontroller_pending_map_.count(tid)) {
+                    original_sender = microcontroller_pending_map_[tid];
+                    microcontroller_pending_map_.erase(tid);
+                    
+                    std::stringstream response_message;
+                    for (size_t i = 0; i < parts.size(); ++i) {
+                        if (i > 0) response_message << ",";
+                        response_message << parts[i];
+                    }
+                    response_message << "|";
+                    
+                    sendToMicrocontroller(original_sender, response_message.str());
+                    return;
+                }
             }
+            RCLCPP_WARN(this->get_logger(), "TID %ld に対する待機中の要求が見つかりません", tid);
         } catch (const std::exception& e) {
             RCLCPP_ERROR(this->get_logger(), "TIDの解析に失敗: %s", e.what());
         }
         return;
     }
     
-    // 上記以外のメッセージはデータハンドラに渡す
+    // ★★★ ここからが追加されたロジック ★★★
+    // マイコンからのネットワーク探索要求: "1,TARGET_NODE,0"
+    if (parts.size() == 3 && parts[0] == "1") {
+        std::string target_node = parts[1];
+        RCLCPP_INFO(this->get_logger(), "🛰️ マイコンからのネットワーク探索要求: ターゲット='%s'", target_node.c_str());
+
+        // 1. 要求元のマイクロコントローラIDを特定する
+        std::string source_mc_id = "unknown_mc";
+        {
+            std::lock_guard<std::mutex> lock(discovery_mutex_);
+            for(const auto& pair : microcontroller_device_map_) {
+                if (pair.second->getPort() == device_port) {
+                    source_mc_id = pair.first;
+                    break;
+                }
+            }
+        }
+
+        if (source_mc_id == "unknown_mc") {
+            RCLCPP_ERROR(this->get_logger(), "ポート %s からの要求ですが、送信元マイコンを特定できません。", device_port.c_str());
+            return;
+        }
+
+        // 2. ターゲットノードに接続されたマイコンのリストをキャッシュから取得
+        std::vector<std::string> mc_list;
+        {
+            std::lock_guard<std::mutex> lock(node_map_mutex_);
+            auto it = node_to_microcontrollers_map_.find(target_node);
+            if (it != node_to_microcontrollers_map_.end()) {
+                mc_list = it->second;
+                RCLCPP_INFO(this->get_logger(), "ノード '%s' に接続されたマイコン %zu 個を発見。", target_node.c_str(), mc_list.size());
+            } else {
+                RCLCPP_WARN(this->get_logger(), "ノード '%s' はネットワークマップに見つかりません。", target_node.c_str());
+            }
+        }
+
+        // 3. 応答メッセージを生成 ("101,PC1,PC2,2,nucleo1,nucleo2|")
+        std::stringstream response_ss;
+        response_ss << "101," << self_node_name_ << "," << target_node << "," << mc_list.size();
+        for(const auto& mc_name : mc_list) {
+            response_ss << "," << mc_name;
+        }
+        response_ss << "|";
+        
+        // 4. 要求元のマイコンに応答を送信
+        RCLCPP_INFO(this->get_logger(), "マイコン '%s' へ探索結果を返信: %s", source_mc_id.c_str(), response_ss.str().c_str());
+        sendToMicrocontroller(source_mc_id, response_ss.str());
+        
+        return; // このメッセージは処理完了
+    }
+    // ★★★ 追加ロジックここまで ★★★
+    
     if (data_handler_callback_) {
         std::string source_mc_id = "unknown_mc";
         {
@@ -210,7 +323,6 @@ void IntegratedCommunicationSystem::handle_serial_data(const std::string& device
                  }
              }
         }
-        // data_handler_callback_ は Request 型を期待するので、ダミーのRequestを作成
         auto dummy_request = std::make_shared<my_cpp_pkg::srv::DataExchange::Request>();
         dummy_request->source_node = source_mc_id;
         dummy_request->string_values = parts;
@@ -220,6 +332,142 @@ void IntegratedCommunicationSystem::handle_serial_data(const std::string& device
 
 int64_t IntegratedCommunicationSystem::generate_transaction_id() { return distribution_(random_engine_); }
 
+void IntegratedCommunicationSystem::setupAutomaticMicrocontrollerRelay() {
+    setDataHandler([this](const std::shared_ptr<my_cpp_pkg::srv::DataExchange::Request> request) {
+        this->handleMicrocontrollerToMicrocontrollerMessage(request);
+    });
+    RCLCPP_INFO(this->get_logger(), "🔗 自動マイコン間通信中継機能を有効化しました");
+}
+
+void IntegratedCommunicationSystem::handleMicrocontrollerToMicrocontrollerMessage(
+    const std::shared_ptr<my_cpp_pkg::srv::DataExchange::Request> request) {
+    
+    const auto& data = request->string_values;
+    if (data.size() < 4) { return; }
+    
+    std::string source_mc = data[1];
+    std::string destination_mc = data[2];
+    
+    {
+        std::lock_guard<std::mutex> lock(discovery_mutex_);
+        if (microcontroller_device_map_.find(destination_mc) == microcontroller_device_map_.end()) {
+            RCLCPP_WARN(this->get_logger(), "❌ 宛先マイコン '%s' が見つかりません。", destination_mc.c_str());
+            return;
+        }
+    }
+    
+    int64_t new_transaction_id = generate_transaction_id();
+    
+    std::stringstream relay_message;
+    relay_message << data[0] << "," << data[1] << "," << data[2] << "," << new_transaction_id;
+    for (size_t i = 4; i < data.size(); ++i) {
+        relay_message << "," << data[i];
+    }
+    relay_message << "|";
+    
+    {
+        std::lock_guard<std::mutex> lock(microcontroller_relay_mutex_);
+        microcontroller_pending_map_[new_transaction_id] = source_mc;
+    }
+    
+    bool sent = sendToMicrocontroller(destination_mc, relay_message.str());
+    if (!sent) {
+        std::lock_guard<std::mutex> lock(microcontroller_relay_mutex_);
+        microcontroller_pending_map_.erase(new_transaction_id);
+    }
+}
+
+// 新規: 自動探索プロセスのエントリーポイント
+void IntegratedCommunicationSystem::startAutoDiscovery(int node_discovery_timeout_ms, int mc_discovery_timeout_ms) {
+    RCLCPP_INFO(this->get_logger(), "🚀 自動探索プロセスを開始します...");
+    
+    // Step 1: 自身に接続されたマイクロコントローラを探索
+    RCLCPP_INFO(this->get_logger(), "  (1/2) ローカルのマイクロコントローラを探索中...");
+    discoverMicrocontrollerIDs(mc_discovery_timeout_ms);
+    auto local_mcs = getDiscoveredMicrocontrollers();
+    {
+        std::lock_guard<std::mutex> lock(node_map_mutex_);
+        node_to_microcontrollers_map_[self_node_name_] = local_mcs;
+    }
+    RCLCPP_INFO(this->get_logger(), "  ローカル探索完了。%zu個のマイコンを発見。", local_mcs.size());
+
+    // Step 2: ネットワーク上の他のノードとそのマイクロコントローラを探索
+    RCLCPP_INFO(this->get_logger(), "  (2/2) ネットワーク上の他ノードを探索中...");
+    discoverNodesAndTheirMicrocontrollers(node_discovery_timeout_ms);
+    
+    RCLCPP_INFO(this->get_logger(), "✨ 自動探索プロセス完了。ネットワーク全体の構成:");
+    auto network_map = getNetworkMicrocontrollerMap();
+    for (const auto& pair : network_map) {
+        std::string mc_list_str;
+        if (pair.second.empty()) {
+            mc_list_str = "(なし)";
+        } else {
+            mc_list_str = std::accumulate(pair.second.begin(), pair.second.end(), std::string(),
+                [](const std::string& a, const std::string& b) { return a.empty() ? b : a + ", " + b; });
+        }
+        RCLCPP_INFO(this->get_logger(), "  - Node[%s] -> MCs: [%s]", pair.first.c_str(), mc_list_str.c_str());
+    }
+}
+
+// 新規: 他のノードとその配下のマイクロコントローラを探索する
+void IntegratedCommunicationSystem::discoverNodesAndTheirMicrocontrollers(int timeout_ms) {
+    auto node_names = this->get_node_names();
+    std::vector<std::string> target_nodes;
+
+    for (const auto& name : node_names) {
+        // 自分自身とROS内部ノード(通常'/'で始まる)を除外
+        if (name != self_node_name_ && name.rfind("/", 0) != 0) {
+            target_nodes.push_back(name);
+        }
+    }
+
+    if (target_nodes.empty()) {
+        RCLCPP_INFO(this->get_logger(), "  他ノードは見つかりませんでした。");
+        return;
+    }
+
+    RCLCPP_INFO(this->get_logger(), "  %zu個の他ノードを検出。サービスを確認し、マイコンリストを要求します...", target_nodes.size());
+
+    using ServiceResponseFuture = rclcpp::Client<my_cpp_pkg::srv::DataExchange>::SharedFuture;
+    std::map<std::string, ServiceResponseFuture> futures;
+
+    for (const auto& node_name : target_nodes) {
+        auto client = get_client(node_name);
+        if (!client->wait_for_service(std::chrono::milliseconds(100))) {
+            RCLCPP_WARN(this->get_logger(), "  ノード '%s' のサービスが見つかりません。", node_name.c_str());
+            continue;
+        }
+
+        auto request = std::make_shared<my_cpp_pkg::srv::DataExchange::Request>();
+        request->request_type = 1; // マイクロコントローラリスト要求
+        request->source_node = self_node_name_;
+        request->destination_node = node_name;
+        request->transaction_id = generate_transaction_id();
+        
+        futures[node_name] = client->async_send_request(request);
+    }
+
+    auto start_time = std::chrono::steady_clock::now();
+    for (auto& pair : futures) {
+        const std::string& node_name = pair.first;
+        auto& future = pair.second;
+        
+        auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time);
+        auto remaining_time = std::chrono::milliseconds(timeout_ms) - time_elapsed;
+        if (remaining_time <= std::chrono::milliseconds(0)) break;
+
+        if (future.wait_for(remaining_time) == std::future_status::ready) {
+            auto response = future.get();
+            if (response && response->response_type == 101) {
+                std::lock_guard<std::mutex> lock(node_map_mutex_);
+                node_to_microcontrollers_map_[node_name] = response->string_values;
+            }
+        } else {
+            RCLCPP_WARN(this->get_logger(), "  ノード '%s' からの応答がタイムアウトしました。", node_name.c_str());
+        }
+    }
+}
+
 rclcpp::Client<my_cpp_pkg::srv::DataExchange>::SharedPtr IntegratedCommunicationSystem::get_client(const std::string &service_name) {
     if (clients_.find(service_name) == clients_.end()) {
         clients_[service_name] = this->create_client<my_cpp_pkg::srv::DataExchange>(service_name);
@@ -227,8 +475,9 @@ rclcpp::Client<my_cpp_pkg::srv::DataExchange>::SharedPtr IntegratedCommunication
     return clients_[service_name];
 }
 
+// create_integrated_system の実装を更新
 std::shared_ptr<IntegratedCommunicationSystem> create_integrated_system(
-    const std::string& node_name, bool use_serial, int baudrate)
+    const std::string& node_name, bool use_serial, int baudrate, bool auto_discover)
 {
     std::vector<std::shared_ptr<SerialCommunication>> serial_devices;
     if (use_serial) {
@@ -236,5 +485,6 @@ std::shared_ptr<IntegratedCommunicationSystem> create_integrated_system(
         serial_devices = SerialCommunication::scanAndConnectDevices(
             {"/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0", "/dev/ttyUSB1"}, speed, "|");
     }
-    return std::make_shared<IntegratedCommunicationSystem>(node_name, serial_devices);
+    // auto_discover フラグをコンストラクタに渡す
+    return std::make_shared<IntegratedCommunicationSystem>(node_name, serial_devices, auto_discover);
 }

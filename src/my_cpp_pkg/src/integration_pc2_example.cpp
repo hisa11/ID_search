@@ -9,7 +9,7 @@
 int main(int argc, char *argv[])
 {
     rclcpp::init(argc, argv);
-    auto system = create_integrated_system("PC2", false, 0);
+    auto system = create_integrated_system("PC2", false, 115200, true);
 
     const int NUM_REQUESTS = 100;
     std::atomic<int> response_count{0};

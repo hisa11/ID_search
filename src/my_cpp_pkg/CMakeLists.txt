@@ -189,6 +189,13 @@ add_dependencies(integration_pc2_example my_cpp_pkg__cpp)
 target_include_directories(integration_pc2_example PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>)
 target_link_libraries(integration_pc2_example ${cpp_typesupport_target})
 
+add_executable(integration_pc3_example src/integration_pc3_example.cpp)
+target_link_libraries(integration_pc3_example integration_lib serial_lib)
+ament_target_dependencies(integration_pc3_example rclcpp)
+add_dependencies(integration_pc3_example my_cpp_pkg__cpp)
+target_include_directories(integration_pc3_example PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>)
+target_link_libraries(integration_pc3_example ${cpp_typesupport_target})
+
 # add_executable(microcontroller_test src/microcontroller_test.cpp)
 # target_link_libraries(microcontroller_test integration_lib serial_lib)
 # ament_target_dependencies(microcontroller_test rclcpp)
@@ -228,6 +235,7 @@ install(TARGETS
   # integration_explain
   integration_pc1_example
   integration_pc2_example
+  integration_pc3_example
   # microcontroller_test
   # baudrate_test
   DESTINATION lib/${PROJECT_NAME}
@@ -298,6 +306,7 @@ install(TARGETS
   # integration_explain
   integration_pc1_example
   integration_pc2_example
+  integration_pc3_example
   # microcontroller_test
   # baudrate_test
   DESTINATION lib/${PROJECT_NAME}
