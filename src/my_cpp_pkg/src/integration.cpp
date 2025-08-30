@@ -1,4 +1,5 @@
 #include "integration.hpp"
+#include "std_msgs/msg/string.hpp"
 #include <chrono>
 #include <sstream>
 #include <algorithm>
@@ -16,6 +17,10 @@ IntegratedCommunicationSystem::IntegratedCommunicationSystem(
     server_ = this->create_service<my_cpp_pkg::srv::DataExchange>(
         self_node_name_,
         std::bind(&IntegratedCommunicationSystem::handle_request, this, std::placeholders::_1, std::placeholders::_2));
+    
+    // ステータス情報をWebサーバーに送信するためのパブリッシャーを作成
+    status_publisher_ = this->create_publisher<std_msgs::msg::String>(
+        "/microcontroller_status", 10);
         
     for(const auto& dev : serial_comms_) {
         dev->setReceiveCallback([this, port=dev->getPort()](const std::string& data){
@@ -236,7 +241,7 @@ void IntegratedCommunicationSystem::handle_request(
             std::string serial_string = ss.str();
             
             RCLCPP_INFO(this->get_logger(), "  -> Serial: %s", serial_string.c_str());
-            bool sent = sendToMicrocontroller(target_mc, serial_string + "\n");
+            bool sent = sendToMicrocontroller(target_mc, serial_string);
             response->response_type = sent ? 200 : 500;
         } else {
             // 他ノードへの転送（自分自身への転送は除外）
@@ -340,7 +345,7 @@ void IntegratedCommunicationSystem::processRequestQueue()
         }
 
         RCLCPP_INFO(this->get_logger(), "マイコン %s にデータ送信: %s", destination_mc.c_str(), ss.str().c_str());
-        bool sent = sendToMicrocontroller(destination_mc, ss.str() + "\n");
+        bool sent = sendToMicrocontroller(destination_mc, ss.str());
         RCLCPP_INFO(this->get_logger(), "送信結果: %s", sent ? "成功" : "失敗");
     }
 }
@@ -486,6 +491,15 @@ void IntegratedCommunicationSystem::handle_serial_data(const std::string& device
             std::lock_guard<std::mutex> lock(message_buffer_mutex_);
             pending_messages_.push(raw_data);
         }
+        
+        // ID2メッセージをROSトピックにもパブリッシュ（Webサーバーに転送）
+        if (status_publisher_) {
+            auto msg = std_msgs::msg::String();
+            msg.data = raw_data;
+            status_publisher_->publish(msg);
+            RCLCPP_INFO(this->get_logger(), "📤 ID2メッセージをROSトピックに送信: %s", raw_data.c_str());
+        }
+        
         return;
     }
     

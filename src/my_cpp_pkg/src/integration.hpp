@@ -3,6 +3,7 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include "my_cpp_pkg/srv/data_exchange.hpp"
+#include "std_msgs/msg/string.hpp"
 #include "serial.hpp"
 #include <string>
 #include <vector>
@@ -70,6 +71,7 @@ private:
     std::string self_node_name_;
     std::vector<std::shared_ptr<SerialCommunication>> serial_comms_;
     rclcpp::Service<my_cpp_pkg::srv::DataExchange>::SharedPtr server_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
     std::map<std::string, rclcpp::Client<my_cpp_pkg::srv::DataExchange>::SharedPtr> clients_;
     DataHandlerCallback data_handler_callback_{nullptr};
     

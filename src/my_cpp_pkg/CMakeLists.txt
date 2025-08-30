@@ -150,7 +150,7 @@ target_include_directories(service_lib PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT
 # integration ライブラリの定義
 add_library(integration_lib src/integration.cpp)
 target_link_libraries(integration_lib serial_lib)
-ament_target_dependencies(integration_lib rclcpp)
+ament_target_dependencies(integration_lib rclcpp std_msgs)
 target_link_libraries(integration_lib ${cpp_typesupport_target})
 
 target_include_directories(integration_lib PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>)
