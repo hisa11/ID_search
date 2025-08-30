@@ -3,8 +3,9 @@
 #include <sstream>
 #include <algorithm>
 #include <numeric>
+#include <thread>
 
-// コンストラクタ: 自動探索フラグを受け取り、有効なら探索スレッドを開始
+// コンストラクタ
 IntegratedCommunicationSystem::IntegratedCommunicationSystem(
     const std::string& node_name, const std::vector<std::shared_ptr<SerialCommunication>>& serial_comms, bool auto_discover)
     : rclcpp::Node(node_name), self_node_name_(node_name), serial_comms_(serial_comms),
@@ -26,38 +27,113 @@ IntegratedCommunicationSystem::IntegratedCommunicationSystem(
     
     setupAutomaticMicrocontrollerRelay();
 
+    // 初期のノード状態とシリアルポート状態を記録
+    {
+        std::lock_guard<std::mutex> lock(monitoring_mutex_);
+        last_known_nodes_ = this->get_node_names();
+        for(const auto& dev : serial_comms_) {
+            last_known_serial_ports_.push_back(dev->getPort());
+        }
+    }
+
     // 自動探索機能が有効な場合、バックグラウンドで探索を開始
     if (auto_discover_enabled_) {
         std::thread discovery_thread(&IntegratedCommunicationSystem::startAutoDiscovery, this, 2000, 3000);
         discovery_thread.detach();
+        
+        // 定期的なモニタリングも開始
+        monitoring_enabled_ = true;
+        monitoring_thread_ = std::thread(&IntegratedCommunicationSystem::monitoringLoop, this);
     }
 }
 
 IntegratedCommunicationSystem::~IntegratedCommunicationSystem()
 {
     shutdown_flag_ = true;
+    monitoring_enabled_ = false;
+    
     queue_cv_.notify_all();
     if (worker_thread_.joinable()) worker_thread_.join();
+    if (monitoring_thread_.joinable()) monitoring_thread_.join();
 }
 
 void IntegratedCommunicationSystem::setDataHandler(DataHandlerCallback callback) { data_handler_callback_ = callback; }
 
 std::vector<std::string> IntegratedCommunicationSystem::discoverMicrocontrollerIDs(int timeout_ms)
 {
+    return discoverMicrocontrollerIDs(timeout_ms, true); // デフォルトでクリアする
+}
+
+std::vector<std::string> IntegratedCommunicationSystem::discoverMicrocontrollerIDs(int timeout_ms, bool clear_existing)
+{
+    RCLCPP_INFO(this->get_logger(), "🔍 マイコン探索を開始します (timeout: %dms, clear_existing: %s)", 
+                timeout_ms, clear_existing ? "true" : "false");
+    
     discovery_promise_ = std::make_shared<std::promise<bool>>();
     auto future = discovery_promise_->get_future();
+    
+    // 既存のマップを一時的に保存
+    std::vector<std::string> previous_microcontrollers;
     {
         std::lock_guard<std::mutex> lock(discovery_mutex_);
-        discovered_microcontrollers_.clear();
-        microcontroller_device_map_.clear(); 
+        previous_microcontrollers = discovered_microcontrollers_;
+        if (clear_existing) {
+            discovered_microcontrollers_.clear();
+            microcontroller_device_map_.clear(); 
+        }
     }
+    
+    // マイコン探索コマンドを送信
     std::string id_request_command = "1," + self_node_name_ + ",0,|";
+    int successful_sends = 0;
+    
     for(auto& dev : serial_comms_) {
-        dev->sendRaw(id_request_command);
+        if (dev && dev->isOpen()) {
+            RCLCPP_INFO(this->get_logger(), "  📡 Sending discovery command to %s", dev->getPort().c_str());
+            RCLCPP_INFO(this->get_logger(), "    Command: '%s'", id_request_command.c_str());
+            if (dev->sendRaw(id_request_command)) {
+                successful_sends++;
+                RCLCPP_INFO(this->get_logger(), "    ✅ Command sent successfully");
+            } else {
+                RCLCPP_WARN(this->get_logger(), "  ⚠️ Failed to send discovery command to %s", dev->getPort().c_str());
+            }
+        } else {
+            RCLCPP_WARN(this->get_logger(), "  ❌ Device %s is not connected", dev ? dev->getPort().c_str() : "unknown");
+        }
     }
-    future.wait_for(std::chrono::milliseconds(timeout_ms));
+    
+    if (successful_sends == 0) {
+        RCLCPP_ERROR(this->get_logger(), "❌ No devices available for discovery");
+        discovery_promise_ = nullptr;
+        return getDiscoveredMicrocontrollers();
+    }
+    
+    RCLCPP_INFO(this->get_logger(), "  📤 Discovery commands sent to %d devices, waiting for responses...", successful_sends);
+    
+    // 応答を待機
+    auto wait_result = future.wait_for(std::chrono::milliseconds(timeout_ms));
     discovery_promise_ = nullptr;
-    return getDiscoveredMicrocontrollers();
+    
+    auto discovered = getDiscoveredMicrocontrollers();
+    
+    if (wait_result == std::future_status::timeout) {
+        RCLCPP_WARN(this->get_logger(), "⏰ Discovery timeout after %dms. Found %zu microcontrollers", timeout_ms, discovered.size());
+    } else {
+        RCLCPP_INFO(this->get_logger(), "✅ Discovery completed. Found %zu microcontrollers", discovered.size());
+    }
+    
+    // 発見されたマイコンをログ出力
+    for (const auto& mc : discovered) {
+        RCLCPP_INFO(this->get_logger(), "  🔗 Discovered: %s", mc.c_str());
+    }
+    
+    // 前回と結果が異なる場合は警告
+    if (discovered.size() != previous_microcontrollers.size()) {
+        RCLCPP_WARN(this->get_logger(), "📊 Microcontroller count changed: %zu -> %zu", 
+                   previous_microcontrollers.size(), discovered.size());
+    }
+    
+    return discovered;
 }
 
 std::vector<std::string> IntegratedCommunicationSystem::getDiscoveredMicrocontrollers() const {
@@ -65,13 +141,11 @@ std::vector<std::string> IntegratedCommunicationSystem::getDiscoveredMicrocontro
     return discovered_microcontrollers_;
 }
 
-// 新規: ネットワーク全体のノードとマイコンのマップを取得
 std::map<std::string, std::vector<std::string>> IntegratedCommunicationSystem::getNetworkMicrocontrollerMap() const {
     std::lock_guard<std::mutex> lock(node_map_mutex_);
     return node_to_microcontrollers_map_;
 }
 
-// ★★★ 非同期送信の実装をこのシグネチャに統一 ★★★
 void IntegratedCommunicationSystem::sendToNodeAsync(
     const std::string& target_node, const std::string& final_destination,
     const std::vector<std::string>& data, const std::string& message, int64_t request_type)
@@ -115,32 +189,115 @@ void IntegratedCommunicationSystem::handle_request(
     const std::shared_ptr<my_cpp_pkg::srv::DataExchange::Request> request,
     std::shared_ptr<my_cpp_pkg::srv::DataExchange::Response> response)
 {
-    RCLCPP_INFO(this->get_logger(), "🔍 サービスリクエスト受信: source=%s, request_type=%ld, data_size=%zu", 
-                request->source_node.c_str(), request->request_type, request->string_values.size());
+    RCLCPP_INFO(this->get_logger(), "🔍 サービスリクエスト受信: source=%s, request_type=%ld", 
+                request->source_node.c_str(), request->request_type);
                 
     if (request->request_type == 1) {
+        // (マイコンリスト要求の処理は変更なし)
         RCLCPP_INFO(this->get_logger(), "📋 マイクロコントローラーリスト要求を処理中...");
-        
         auto microcontroller_list = getDiscoveredMicrocontrollers();
         response->string_values = microcontroller_list;
-        response->response_type = 101; // Info Response
+        response->response_type = 101;
+        response->return_node = self_node_name_;
+        RCLCPP_INFO(this->get_logger(), "✅ マイクロコントローラーリスト応答: %zu個", microcontroller_list.size());
+        return;
+    }
+
+    if (request->request_type == 2) {
+        std::string target_mc = request->destination_node;
+        bool is_local = false;
+
+        {
+            std::lock_guard<std::mutex> lock(discovery_mutex_);
+            if (microcontroller_device_map_.count(target_mc)) {
+                is_local = true;
+            }
+            
+            // デバッグ用：現在発見されているマイコンをログ出力
+            RCLCPP_DEBUG(this->get_logger(), "📊 Current discovered microcontrollers:");
+            for (const auto& mc : discovered_microcontrollers_) {
+                RCLCPP_DEBUG(this->get_logger(), "  - %s", mc.c_str());
+            }
+        }
+
+        RCLCPP_INFO(this->get_logger(), "🔍 (Type 2) Processing command for '%s', is_local=%s", 
+                   target_mc.c_str(), is_local ? "true" : "false");
+
+        if (is_local) {
+            // ★★★ 配列をカンマ区切りの文字列に変換して直接シリアル送信 ★★★
+            RCLCPP_INFO(this->get_logger(), "📥 (Type 2) Local command for '%s'", target_mc.c_str());
+            
+            std::stringstream ss;
+            const auto& data_array = request->string_values;
+            for (size_t i = 0; i < data_array.size(); ++i) {
+                ss << data_array[i] << (i == data_array.size() - 1 ? "" : ",");
+            }
+            ss << "|";
+            std::string serial_string = ss.str();
+            
+            RCLCPP_INFO(this->get_logger(), "  -> Serial: %s", serial_string.c_str());
+            bool sent = sendToMicrocontroller(target_mc, serial_string + "\n");
+            response->response_type = sent ? 200 : 500;
+        } else {
+            // 他ノードへの転送（自分自身への転送は除外）
+            std::string forward_to_node;
+            {
+                std::lock_guard<std::mutex> lock(node_map_mutex_);
+                for (const auto& pair : node_to_microcontrollers_map_) {
+                    // 自分自身のノードは除外
+                    if (pair.first == self_node_name_) {
+                        continue;
+                    }
+                    if (std::find(pair.second.begin(), pair.second.end(), target_mc) != pair.second.end()) {
+                        forward_to_node = pair.first;
+                        break;
+                    }
+                }
+            }
+
+            if (!forward_to_node.empty()) {
+                RCLCPP_INFO(this->get_logger(), "➡️ (Type 2) Forwarding command for '%s' to node '%s'", target_mc.c_str(), forward_to_node.c_str());
+                sendToNodeAsync(forward_to_node, request->destination_node, request->string_values, "", request->request_type);
+                response->response_type = 202;
+            } else {
+                RCLCPP_ERROR(this->get_logger(), "❌ (Type 2) Destination MC '%s' not found in network or only available locally.", target_mc.c_str());
+                response->response_type = 404;
+            }
+        }
+        
+        response->return_node = self_node_name_;
+        response->transaction_id = request->transaction_id;
+        return;
+    }
+
+    if (request->request_type == 3) { // メッセージバッファからの取得
+        RCLCPP_INFO(this->get_logger(), "🔍 (Type 3) Getting buffered messages");
+        
+        std::vector<std::string> buffered_messages;
+        {
+            std::lock_guard<std::mutex> lock(message_buffer_mutex_);
+            while (!pending_messages_.empty()) {
+                buffered_messages.push_back(pending_messages_.front());
+                pending_messages_.pop();
+            }
+        }
+        
+        response->string_values = buffered_messages;
+        response->response_type = 200;
         response->return_node = self_node_name_;
         response->transaction_id = request->transaction_id;
         
-        RCLCPP_INFO(this->get_logger(), "✅ マイクロコントローラーリスト応答: %zu個", microcontroller_list.size());
-        for (size_t i = 0; i < microcontroller_list.size(); ++i) {
-            RCLCPP_INFO(this->get_logger(), "  🔌 [%zu] %s", i, microcontroller_list[i].c_str());
-        }
+        RCLCPP_INFO(this->get_logger(), "📤 (Type 3) Returned %zu buffered messages", buffered_messages.size());
         return;
     }
-    
-    if (request->request_type == 102) {
+
+    if (request->request_type == 102) { // マイコンからの応答処理
         if (data_handler_callback_) {
             data_handler_callback_(request);
         } else {
             RCLCPP_WARN(this->get_logger(), "データハンドラーが設定されていません");
         }
-    } else {
+    } else { // その他のタイプは従来通りキューイング
         {
             std::lock_guard<std::mutex> lock(queue_mutex_);
             request_queue_.push(request);
@@ -183,14 +340,19 @@ void IntegratedCommunicationSystem::processRequestQueue()
         }
 
         RCLCPP_INFO(this->get_logger(), "マイコン %s にデータ送信: %s", destination_mc.c_str(), ss.str().c_str());
-        bool sent = sendToMicrocontroller(destination_mc, ss.str());
+        bool sent = sendToMicrocontroller(destination_mc, ss.str() + "\n");
         RCLCPP_INFO(this->get_logger(), "送信結果: %s", sent ? "成功" : "失敗");
     }
 }
 
 void IntegratedCommunicationSystem::handle_serial_data(const std::string& device_port, const std::string& raw_data) {
+    RCLCPP_DEBUG(this->get_logger(), "📥 Received serial data from %s: '%s'", device_port.c_str(), raw_data.c_str());
+    
     std::string data = raw_data;
-    if (data.empty() || data.back() != '|') return;
+    if (data.empty() || data.back() != '|') {
+        RCLCPP_DEBUG(this->get_logger(), "⚠️ Invalid data format (no terminating '|'): '%s'", raw_data.c_str());
+        return;
+    }
     data.pop_back();
 
     std::vector<std::string> parts;
@@ -198,8 +360,15 @@ void IntegratedCommunicationSystem::handle_serial_data(const std::string& device
     std::string item;
     while(std::getline(ss, item, ',')) parts.push_back(item);
 
+    RCLCPP_DEBUG(this->get_logger(), "📊 Parsed %zu parts from serial data", parts.size());
+    for (size_t i = 0; i < parts.size(); ++i) {
+        RCLCPP_DEBUG(this->get_logger(), "  Part[%zu]: '%s'", i, parts[i].c_str());
+    }
+
     if (parts.size() >= 2 && parts[0] == "101") {
+        RCLCPP_INFO(this->get_logger(), "🔍 Processing ID discovery response: ID=101");
         std::string mc_id = parts[1];
+        RCLCPP_INFO(this->get_logger(), "    Microcontroller ID: '%s'", mc_id.c_str());
         bool newly_discovered = false;
         {
             std::lock_guard<std::mutex> lock(discovery_mutex_);
@@ -212,11 +381,16 @@ void IntegratedCommunicationSystem::handle_serial_data(const std::string& device
                     }
                 }
                 newly_discovered = true;
+            } else {
+                RCLCPP_DEBUG(this->get_logger(), "    Microcontroller '%s' already discovered", mc_id.c_str());
             }
         }
         if (newly_discovered) {
             RCLCPP_INFO(this->get_logger(), "✅ マイコンID '%s' をポート %s で発見・登録しました。", mc_id.c_str(), device_port.c_str());
-            if (discovery_promise_) { discovery_promise_->set_value(true); }
+            if (discovery_promise_) { 
+                RCLCPP_INFO(this->get_logger(), "🎯 Discovery promise fulfilled for '%s'", mc_id.c_str());
+                discovery_promise_->set_value(true); 
+            }
         }
         return;
     }
@@ -249,7 +423,7 @@ void IntegratedCommunicationSystem::handle_serial_data(const std::string& device
                     }
                     response_message << "|";
                     
-                    sendToMicrocontroller(original_sender, response_message.str());
+                    sendToMicrocontroller(original_sender, response_message.str() + "\n");
                     return;
                 }
             }
@@ -260,13 +434,10 @@ void IntegratedCommunicationSystem::handle_serial_data(const std::string& device
         return;
     }
     
-    // ★★★ ここからが追加されたロジック ★★★
-    // マイコンからのネットワーク探索要求: "1,TARGET_NODE,0"
     if (parts.size() == 3 && parts[0] == "1") {
         std::string target_node = parts[1];
         RCLCPP_INFO(this->get_logger(), "🛰️ マイコンからのネットワーク探索要求: ターゲット='%s'", target_node.c_str());
 
-        // 1. 要求元のマイクロコントローラIDを特定する
         std::string source_mc_id = "unknown_mc";
         {
             std::lock_guard<std::mutex> lock(discovery_mutex_);
@@ -283,7 +454,6 @@ void IntegratedCommunicationSystem::handle_serial_data(const std::string& device
             return;
         }
 
-        // 2. ターゲットノードに接続されたマイコンのリストをキャッシュから取得
         std::vector<std::string> mc_list;
         {
             std::lock_guard<std::mutex> lock(node_map_mutex_);
@@ -296,7 +466,6 @@ void IntegratedCommunicationSystem::handle_serial_data(const std::string& device
             }
         }
 
-        // 3. 応答メッセージを生成 ("101,PC1,PC2,2,nucleo1,nucleo2|")
         std::stringstream response_ss;
         response_ss << "101," << self_node_name_ << "," << target_node << "," << mc_list.size();
         for(const auto& mc_name : mc_list) {
@@ -304,14 +473,23 @@ void IntegratedCommunicationSystem::handle_serial_data(const std::string& device
         }
         response_ss << "|";
         
-        // 4. 要求元のマイコンに応答を送信
         RCLCPP_INFO(this->get_logger(), "マイコン '%s' へ探索結果を返信: %s", source_mc_id.c_str(), response_ss.str().c_str());
-        sendToMicrocontroller(source_mc_id, response_ss.str());
+        sendToMicrocontroller(source_mc_id, response_ss.str() + "\n");
         
-        return; // このメッセージは処理完了
+        return;
     }
-    // ★★★ 追加ロジックここまで ★★★
     
+    // ID2メッセージをバッファリング
+    if (parts.size() >= 1 && parts[0] == "2") {
+        RCLCPP_INFO(this->get_logger(), "📥 ID2メッセージをバッファリング: %s", raw_data.c_str());
+        {
+            std::lock_guard<std::mutex> lock(message_buffer_mutex_);
+            pending_messages_.push(raw_data);
+        }
+        return;
+    }
+    
+    // マイコンから送られてきた文字をそのままPCに送信
     if (data_handler_callback_) {
         std::string source_mc_id = "unknown_mc";
         {
@@ -323,9 +501,14 @@ void IntegratedCommunicationSystem::handle_serial_data(const std::string& device
                  }
              }
         }
+        
+        // 元の生データをそのままPCに転送
+        RCLCPP_INFO(this->get_logger(), "📤 マイコン '%s' からのデータをPCに転送: %s", source_mc_id.c_str(), raw_data.c_str());
+        
         auto dummy_request = std::make_shared<my_cpp_pkg::srv::DataExchange::Request>();
         dummy_request->source_node = source_mc_id;
         dummy_request->string_values = parts;
+        dummy_request->message = raw_data; // 元の文字列をそのまま保存
         data_handler_callback_(dummy_request);
     }
 }
@@ -370,14 +553,13 @@ void IntegratedCommunicationSystem::handleMicrocontrollerToMicrocontrollerMessag
         microcontroller_pending_map_[new_transaction_id] = source_mc;
     }
     
-    bool sent = sendToMicrocontroller(destination_mc, relay_message.str());
+    bool sent = sendToMicrocontroller(destination_mc, relay_message.str() + "\n");
     if (!sent) {
         std::lock_guard<std::mutex> lock(microcontroller_relay_mutex_);
         microcontroller_pending_map_.erase(new_transaction_id);
     }
 }
 
-// 新規: 自動探索プロセスのエントリーポイント
 void IntegratedCommunicationSystem::startAutoDiscovery(int node_discovery_timeout_ms, int mc_discovery_timeout_ms) {
     RCLCPP_INFO(this->get_logger(), "🚀 自動探索プロセスを開始します...");
     
@@ -390,6 +572,12 @@ void IntegratedCommunicationSystem::startAutoDiscovery(int node_discovery_timeou
         node_to_microcontrollers_map_[self_node_name_] = local_mcs;
     }
     RCLCPP_INFO(this->get_logger(), "  ローカル探索完了。%zu個のマイコンを発見。", local_mcs.size());
+
+    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    // ★ ここに待機処理を追加します ★
+    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    RCLCPP_INFO(this->get_logger(), "  ネットワーク接続の安定化のため1秒待機します...");
+    std::this_thread::sleep_for(std::chrono::seconds(1));
 
     // Step 2: ネットワーク上の他のノードとそのマイクロコントローラを探索
     RCLCPP_INFO(this->get_logger(), "  (2/2) ネットワーク上の他ノードを探索中...");
@@ -409,20 +597,61 @@ void IntegratedCommunicationSystem::startAutoDiscovery(int node_discovery_timeou
     }
 }
 
-// 新規: 他のノードとその配下のマイクロコントローラを探索する
 void IntegratedCommunicationSystem::discoverNodesAndTheirMicrocontrollers(int timeout_ms) {
-    auto node_names = this->get_node_names();
-    std::vector<std::string> target_nodes;
+    std::vector<std::string> node_names;
+    const int max_retries = 5;
+    const auto retry_interval = std::chrono::milliseconds(500);
 
-    for (const auto& name : node_names) {
-        // 自分自身とROS内部ノード(通常'/'で始まる)を除外
-        if (name != self_node_name_ && name.rfind("/", 0) != 0) {
-            target_nodes.push_back(name);
+    for (int i = 0; i < max_retries; ++i) {
+        node_names = this->get_node_names();
+        
+        std::string current_nodes_str = std::accumulate(node_names.begin(), node_names.end(), std::string(),
+            [](const std::string& a, const std::string& b) { return a.empty() ? b : a + ", " + b; });
+        RCLCPP_INFO(this->get_logger(), "  [探索試行 %d/%d] 現在認識しているノード: [%s]", i + 1, max_retries, current_nodes_str.c_str());
+
+        // 自分自身以外に1つでも "意味のある" ノードが見つかれば続行
+        // (自分自身とros2cliデーモン以外のノードが1つでもあればOK)
+        long meaningful_nodes = std::count_if(node_names.begin(), node_names.end(), [this](const std::string& name) {
+            return name != ("/" + this->self_node_name_) && name.find("_ros2cli_daemon") == std::string::npos;
+        });
+        if (meaningful_nodes > 0) {
+            break;
+        }
+
+        if (i < max_retries - 1) {
+             RCLCPP_INFO(this->get_logger(), "  他ノードがまだ見つかりません。少し待って再試行します...");
+            std::this_thread::sleep_for(retry_interval);
         }
     }
 
+    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    // ★ ここからが修正されたフィルタリングロジックです ★
+    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    std::vector<std::string> target_nodes;
+    std::string self_full_name = "/" + self_node_name_; // e.g., "/PC3"
+
+    for (const auto& name : node_names) {
+        // 自分自身のノードはスキップ
+        if (name == self_full_name) {
+            continue;
+        }
+        // ros2cliが内部的に使用するデーモンノードはスキップ
+        if (name.find("_ros2cli_daemon") != std::string::npos) {
+            continue;
+        }
+        // ROS 2の内部システムノードをスキップ (より堅牢に)
+        if (name == "/rosout" || name == "/parameter_events") {
+            continue;
+        }
+        
+        // 上記のいずれでもなければ、ターゲットノードとして追加
+        // ★注意: get_node_names()が返すのは /PC1 のような名前なので、/ を除去せずにそのまま使う
+        target_nodes.push_back(name.substr(1)); // 先頭の'/'を除去して "PC1" の形式で追加
+    }
+    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
     if (target_nodes.empty()) {
-        RCLCPP_INFO(this->get_logger(), "  他ノードは見つかりませんでした。");
+        RCLCPP_INFO(this->get_logger(), "  最終的に他ノードは見つかりませんでした。ROSネットワーク設定を確認してください。");
         return;
     }
 
@@ -433,18 +662,18 @@ void IntegratedCommunicationSystem::discoverNodesAndTheirMicrocontrollers(int ti
 
     for (const auto& node_name : target_nodes) {
         auto client = get_client(node_name);
-        if (!client->wait_for_service(std::chrono::milliseconds(100))) {
+        if (!client->wait_for_service(std::chrono::milliseconds(200))) { // 少し待機時間を増やす
             RCLCPP_WARN(this->get_logger(), "  ノード '%s' のサービスが見つかりません。", node_name.c_str());
             continue;
         }
 
         auto request = std::make_shared<my_cpp_pkg::srv::DataExchange::Request>();
-        request->request_type = 1; // マイクロコントローラリスト要求
+        request->request_type = 1;
         request->source_node = self_node_name_;
         request->destination_node = node_name;
         request->transaction_id = generate_transaction_id();
         
-        futures[node_name] = client->async_send_request(request);
+        futures[node_name] = client->async_send_request(request).future.share();
     }
 
     auto start_time = std::chrono::steady_clock::now();
@@ -468,6 +697,9 @@ void IntegratedCommunicationSystem::discoverNodesAndTheirMicrocontrollers(int ti
     }
 }
 
+
+
+
 rclcpp::Client<my_cpp_pkg::srv::DataExchange>::SharedPtr IntegratedCommunicationSystem::get_client(const std::string &service_name) {
     if (clients_.find(service_name) == clients_.end()) {
         clients_[service_name] = this->create_client<my_cpp_pkg::srv::DataExchange>(service_name);
@@ -475,7 +707,213 @@ rclcpp::Client<my_cpp_pkg::srv::DataExchange>::SharedPtr IntegratedCommunication
     return clients_[service_name];
 }
 
-// create_integrated_system の実装を更新
+void IntegratedCommunicationSystem::monitoringLoop() {
+    RCLCPP_INFO(this->get_logger(), "🔄 定期的なモニタリングループを開始しました");
+    
+    while (monitoring_enabled_ && !shutdown_flag_) {
+        // 3秒間隔で監視
+        std::this_thread::sleep_for(std::chrono::seconds(3));
+        
+        if (!monitoring_enabled_ || shutdown_flag_) break;
+        
+        bool network_changed = detectNetworkChanges();
+        bool serial_changed = detectSerialDeviceChanges();
+        
+        // シリアルデバイスの実際の接続状態もチェック
+        bool serial_connection_issue = checkSerialConnectionHealth();
+        
+        if (network_changed || serial_changed || serial_connection_issue) {
+            RCLCPP_INFO(this->get_logger(), "🔄 変更を検出: ネットワーク=%s, シリアル=%s, 接続問題=%s - 再探索を実行します", 
+                       network_changed ? "変更あり" : "変更なし", 
+                       serial_changed ? "変更あり" : "変更なし",
+                       serial_connection_issue ? "検出" : "なし");
+            
+            if (serial_changed || serial_connection_issue) {
+                rescanSerialDevices();
+                // シリアル問題がある場合のみ、影響を受けるマイコンのマップを部分的にクリア
+                RCLCPP_INFO(this->get_logger(), "🔄 シリアル問題によりマイコン探索を実行します");
+                
+                // 再探索を実行（マイコンマップはクリアしない、additive discovery）
+                discoverMicrocontrollerIDs(2000, false); // クリアしない
+                discoverNodesAndTheirMicrocontrollers(2000);
+            } else {
+                // 変更がなくても定期的に探索を実行（マイコンマップはクリアしない）
+                RCLCPP_DEBUG(this->get_logger(), "🔄 定期探索を実行中...");
+                discoverMicrocontrollerIDs(1000, false); // クリアしない
+            }
+        }
+    }
+    
+    RCLCPP_INFO(this->get_logger(), "🔄 モニタリングループを終了しました");
+}
+
+bool IntegratedCommunicationSystem::detectNetworkChanges() {
+    std::vector<std::string> current_nodes = this->get_node_names();
+    
+    std::lock_guard<std::mutex> lock(monitoring_mutex_);
+    
+    // ノード数が変わった場合
+    if (current_nodes.size() != last_known_nodes_.size()) {
+        RCLCPP_INFO(this->get_logger(), "📊 ノード数の変化を検出: %zu -> %zu", 
+                   last_known_nodes_.size(), current_nodes.size());
+        last_known_nodes_ = current_nodes;
+        return true;
+    }
+    
+    // ノードの内容が変わった場合
+    std::sort(current_nodes.begin(), current_nodes.end());
+    std::vector<std::string> sorted_last_nodes = last_known_nodes_;
+    std::sort(sorted_last_nodes.begin(), sorted_last_nodes.end());
+    
+    if (current_nodes != sorted_last_nodes) {
+        RCLCPP_INFO(this->get_logger(), "📊 ノード構成の変化を検出");
+        last_known_nodes_ = this->get_node_names(); // 元の順序で保存
+        return true;
+    }
+    
+    return false;
+}
+
+bool IntegratedCommunicationSystem::detectSerialDeviceChanges() {
+    std::vector<std::string> current_ports;
+    for(const auto& dev : serial_comms_) {
+        current_ports.push_back(dev->getPort());
+    }
+    
+    std::lock_guard<std::mutex> lock(monitoring_mutex_);
+    
+    // ポート数が変わった場合
+    if (current_ports.size() != last_known_serial_ports_.size()) {
+        RCLCPP_INFO(this->get_logger(), "🔌 シリアルポート数の変化を検出: %zu -> %zu", 
+                   last_known_serial_ports_.size(), current_ports.size());
+        last_known_serial_ports_ = current_ports;
+        return true;
+    }
+    
+    // ポートの内容が変わった場合
+    std::sort(current_ports.begin(), current_ports.end());
+    std::vector<std::string> sorted_last_ports = last_known_serial_ports_;
+    std::sort(sorted_last_ports.begin(), sorted_last_ports.end());
+    
+    if (current_ports != sorted_last_ports) {
+        RCLCPP_INFO(this->get_logger(), "🔌 シリアルポート構成の変化を検出");
+        last_known_serial_ports_.clear();
+        for(const auto& dev : serial_comms_) {
+            last_known_serial_ports_.push_back(dev->getPort());
+        }
+        return true;
+    }
+    
+    return false;
+}
+
+void IntegratedCommunicationSystem::rescanSerialDevices() {
+    RCLCPP_INFO(this->get_logger(), "🔌 シリアルデバイスの再スキャンを実行中...");
+    
+    // 既存のシリアルデバイスの再接続を試行
+    for (auto& dev : serial_comms_) {
+        if (dev) {
+            RCLCPP_INFO(this->get_logger(), "  🔄 %s の再接続を試行中...", dev->getPort().c_str());
+            
+            if (!dev->isOpen() || !dev->checkConnection()) {
+                RCLCPP_WARN(this->get_logger(), "  ⚠️ %s に問題が検出されました。再接続を試行します。", dev->getPort().c_str());
+                
+                if (dev->reconnect()) {
+                    RCLCPP_INFO(this->get_logger(), "  ✅ %s の再接続に成功しました。", dev->getPort().c_str());
+                    
+                    // 受信コールバックを再設定
+                    dev->setReceiveCallback([this, port=dev->getPort()](const std::string& data){
+                        this->handle_serial_data(port, data);
+                    });
+                    dev->startReceiving();
+                } else {
+                    RCLCPP_ERROR(this->get_logger(), "  ❌ %s の再接続に失敗しました。", dev->getPort().c_str());
+                }
+            } else {
+                RCLCPP_INFO(this->get_logger(), "  ✅ %s は正常に動作しています。", dev->getPort().c_str());
+            }
+        }
+    }
+    
+    // 新しいデバイスの検索も試行
+    std::vector<std::string> ports_to_scan = {"/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0", "/dev/ttyUSB1"};
+    std::vector<std::string> existing_ports;
+    
+    for (const auto& dev : serial_comms_) {
+        if (dev) {
+            existing_ports.push_back(dev->getPort());
+        }
+    }
+    
+    // 既存のポート以外で新しいデバイスを検索
+    for (const auto& port : ports_to_scan) {
+        if (std::find(existing_ports.begin(), existing_ports.end(), port) == existing_ports.end()) {
+            RCLCPP_INFO(this->get_logger(), "  🔍 新しいデバイスを検索中: %s", port.c_str());
+            
+            std::string node_name = "new_device_" + std::to_string(serial_comms_.size()) + "_node";
+            auto new_device = std::make_shared<SerialCommunication>(node_name, port, B115200, "|");
+            
+            if (new_device->initialize()) {
+                RCLCPP_INFO(this->get_logger(), "  ✅ 新しいデバイスを発見: %s", port.c_str());
+                
+                new_device->setReceiveCallback([this, port](const std::string& data){
+                    this->handle_serial_data(port, data);
+                });
+                new_device->startReceiving();
+                
+                serial_comms_.push_back(new_device);
+                
+                // 新しいデバイスに対してマイコン探索を実行
+                std::string id_request_command = "1," + self_node_name_ + ",0,|";
+                new_device->sendRaw(id_request_command);
+            }
+        }
+    }
+    
+    RCLCPP_INFO(this->get_logger(), "🔌 シリアルデバイスの再スキャン完了。現在 %zu 個のデバイスが接続されています。", serial_comms_.size());
+}
+
+bool IntegratedCommunicationSystem::checkSerialConnectionHealth() {
+    bool has_issues = false;
+    
+    // 現在発見されているマイコンの数をチェック
+    size_t current_mc_count = 0;
+    {
+        std::lock_guard<std::mutex> lock(discovery_mutex_);
+        current_mc_count = discovered_microcontrollers_.size();
+    }
+    
+    // シリアルデバイスは接続されているがマイコンが見つからない場合
+    if (serial_comms_.size() > 0 && current_mc_count == 0) {
+        RCLCPP_WARN(this->get_logger(), "⚠️ シリアルデバイスは接続されていますが、マイコンが見つかりません。再探索が必要です。");
+        has_issues = true;
+    }
+    
+    // 各シリアルデバイスの詳細な健康チェック
+    for (const auto& dev : serial_comms_) {
+        if (!dev) {
+            continue;
+        }
+        
+        if (!dev->isOpen()) {
+            RCLCPP_WARN(this->get_logger(), "⚠️ シリアルデバイス %s の接続が失われています。", dev->getPort().c_str());
+            has_issues = true;
+        } else {
+            // 接続が開いていても、実際に通信可能かチェック
+            if (!dev->checkConnection()) {
+                RCLCPP_WARN(this->get_logger(), "⚠️ シリアルデバイス %s は開いていますが、通信に問題があります。", dev->getPort().c_str());
+                has_issues = true;
+            }
+        }
+    }
+    
+    if (has_issues) {
+        RCLCPP_WARN(this->get_logger(), "⚠️ シリアル接続に問題が検出されました。再接続を試行します。");
+    }
+    
+    return has_issues;
+}
+
 std::shared_ptr<IntegratedCommunicationSystem> create_integrated_system(
     const std::string& node_name, bool use_serial, int baudrate, bool auto_discover)
 {
@@ -485,6 +923,5 @@ std::shared_ptr<IntegratedCommunicationSystem> create_integrated_system(
         serial_devices = SerialCommunication::scanAndConnectDevices(
             {"/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0", "/dev/ttyUSB1"}, speed, "|");
     }
-    // auto_discover フラグをコンストラクタに渡す
     return std::make_shared<IntegratedCommunicationSystem>(node_name, serial_devices, auto_discover);
 }

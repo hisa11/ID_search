@@ -2,24 +2,32 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>my_cpp_pkg</name>
-  <version>1.0.0</version>
-  <description>ROS2 C++ package with serial communication, topic, service examples and SearchID device management system</description>
-  <maintainer email="hisahisa1120@outlook.jp">hisa</maintainer>
-  <license>MIT</license>
-
-  <author email="hisahisa1120@outlook.jp">hisa</author>
+  <version>0.0.0</version>
+  <description>TODO: Package description</description>
+  <maintainer email="user@todo.todo">user</maintainer>
+  <license>TODO: License declaration</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <!-- ここからが重要な依存関係 -->
   <depend>rclcpp</depend>
   <depend>std_msgs</depend>
   <depend>std_srvs</depend>
-  <depend>rosidl_default_generators</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  
+  <!-- ビルド時にメッセージ/サービス生成で必要 -->
+  <build_depend>rosidl_default_generators</build_depend>
+
+  <!-- 実行時に生成されたメッセージ/サービスを利用する際に必要 -->
   <exec_depend>rosidl_default_runtime</exec_depend>
+
+  <!-- このパッケージがインターフェース定義を含んでいることを示す -->
   <member_of_group>rosidl_interface_packages</member_of_group>
 
   <test_depend>ament_lint_auto</test_depend>
-  <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_copyright</test_depend>
+  <test_depend>ament_cmake_cpplint</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

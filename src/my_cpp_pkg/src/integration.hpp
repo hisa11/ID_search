@@ -23,12 +23,12 @@ class IntegratedCommunicationSystem : public rclcpp::Node
 public:
     using DataHandlerCallback = std::function<void(const std::shared_ptr<my_cpp_pkg::srv::DataExchange::Request>)>;
     
-    // コンストラクタに自動探索フラグを追加
-    explicit IntegratedCommunicationSystem(const std::string& node_name, const std::vector<std::shared_ptr<SerialCommunication>>& serial_comms, bool auto_discover);
+    explicit IntegratedCommunicationSystem(const std::string& node_name, const std::vector<std::shared_ptr<SerialCommunication>>& serial_comms, bool auto_discover = false);
     ~IntegratedCommunicationSystem();
 
     void setDataHandler(DataHandlerCallback callback);
     std::vector<std::string> discoverMicrocontrollerIDs(int timeout_ms = 2000);
+    std::vector<std::string> discoverMicrocontrollerIDs(int timeout_ms, bool clear_existing);
 
     void sendToNodeAsync(
         const std::string& target_node,
@@ -39,14 +39,20 @@ public:
 
     const std::vector<std::shared_ptr<SerialCommunication>>& getSerialDevices() const { return serial_comms_; }
     std::vector<std::string> getDiscoveredMicrocontrollers() const;
+    // 新規追加: ネットワーク全体のノードとマイコンのマップを取得
     std::map<std::string, std::vector<std::string>> getNetworkMicrocontrollerMap() const;
 
 private:
+    // ★★★ handle_request のシグネチャを正しい2引数形式に戻す ★★★
     void handle_request(
         const std::shared_ptr<my_cpp_pkg::srv::DataExchange::Request> request,
         std::shared_ptr<my_cpp_pkg::srv::DataExchange::Response> response);
         
     void handle_serial_data(const std::string& device_port, const std::string& raw_data);
+
+    // ★★★ メッセージバッファリング機能を追加 ★★★
+    std::queue<std::string> pending_messages_;
+    std::mutex message_buffer_mutex_;
 
     void processRequestQueue();
     bool sendToMicrocontroller(const std::string& microcontroller_id, const std::string& data);
@@ -57,7 +63,7 @@ private:
     void setupAutomaticMicrocontrollerRelay();
     void handleMicrocontrollerToMicrocontrollerMessage(const std::shared_ptr<my_cpp_pkg::srv::DataExchange::Request> request);
 
-    // 自動探索機能
+    // 新規追加: 自動探索機能
     void startAutoDiscovery(int node_discovery_timeout_ms, int mc_discovery_timeout_ms);
     void discoverNodesAndTheirMicrocontrollers(int timeout_ms);
 
@@ -78,23 +84,37 @@ private:
     mutable std::mutex discovery_mutex_;
     std::shared_ptr<std::promise<bool>> discovery_promise_;
 
-    // ネットワーク探索結果
-    std::map<std::string, std::vector<std::string>> node_to_microcontrollers_map_;
-    mutable std::mutex node_map_mutex_;
-    bool auto_discover_enabled_;
-
     std::queue<std::shared_ptr<my_cpp_pkg::srv::DataExchange::Request>> request_queue_;
     std::mutex queue_mutex_;
     std::condition_variable queue_cv_;
     std::thread worker_thread_;
     std::atomic<bool> shutdown_flag_{false};
 
+    // 新規追加: 自動探索関連
+    std::atomic<bool> auto_discover_enabled_;
+    std::map<std::string, std::vector<std::string>> node_to_microcontrollers_map_;
+    mutable std::mutex node_map_mutex_;
+
     std::mt19937_64 random_engine_;
     std::uniform_int_distribution<int64_t> distribution_;
+
+    // 新規追加: 定期的なモニタリング機能
+    void startPeriodicMonitoring();
+    void monitoringLoop();
+    bool detectNetworkChanges();
+    bool detectSerialDeviceChanges();
+    bool checkSerialConnectionHealth();
+    void rescanSerialDevices();
+    
+    std::thread monitoring_thread_;
+    std::vector<std::string> last_known_nodes_;
+    std::vector<std::string> last_known_serial_ports_;
+    mutable std::mutex monitoring_mutex_;
+    std::atomic<bool> monitoring_enabled_{false};
+
 };
 
-// グローバル関数に自動探索フラグを追加 (デフォルトはtrue)
 std::shared_ptr<IntegratedCommunicationSystem> create_integrated_system(
-    const std::string& node_name, bool use_serial, int baudrate, bool auto_discover = true);
+    const std::string& node_name, bool use_serial, int baudrate, bool auto_discover = false);
 
 #endif // INTEGRATION_HPP

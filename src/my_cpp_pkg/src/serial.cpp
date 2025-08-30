@@ -240,6 +240,58 @@ bool SerialCommunication::isOpen() const {
     return serial_fd_ >= 0;
 }
 
+bool SerialCommunication::reconnect() {
+    RCLCPP_INFO(this->get_logger(), "Attempting to reconnect to %s...", port_.c_str());
+    
+    // 既存の接続を閉じる
+    if (serial_fd_ >= 0) {
+        close(serial_fd_);
+        serial_fd_ = -1;
+        RCLCPP_INFO(this->get_logger(), "Closed existing connection");
+    }
+    
+    // 受信を停止
+    bool was_receiving = is_receiving_;
+    if (is_receiving_) {
+        stopReceiving();
+    }
+    
+    // バッファをクリア
+    receive_buffer_.clear();
+    
+    // 再接続を試行
+    bool success = initialize();
+    
+    if (success) {
+        RCLCPP_INFO(this->get_logger(), "Successfully reconnected to %s", port_.c_str());
+        // 受信を再開
+        if (was_receiving) {
+            startReceiving();
+        }
+    } else {
+        RCLCPP_ERROR(this->get_logger(), "Failed to reconnect to %s", port_.c_str());
+    }
+    
+    return success;
+}
+
+bool SerialCommunication::checkConnection() {
+    if (!isOpen()) {
+        return false;
+    }
+    
+    // 簡単な接続テスト（実際にデータを送信してみる）
+    const std::string test_command = "";  // 空のコマンド
+    ssize_t bytes_written = write(serial_fd_, test_command.c_str(), test_command.length());
+    
+    if (bytes_written < 0) {
+        RCLCPP_WARN(this->get_logger(), "Connection check failed for %s", port_.c_str());
+        return false;
+    }
+    
+    return true;
+}
+
 void SerialCommunication::flushPort() {
     if (serial_fd_ >= 0) {
         // 送信バッファをフラッシュ

@@ -12,15 +12,18 @@ find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+# ★★★ この行を追加 ★★★
 find_package(rosidl_default_generators REQUIRED)
 
-# サービス定義を生成
+# ★★★ srvファイルからコードを生成する設定 ★★★
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/AddThreeInts.srv"
   "msg/Controller.msg"
   "srv/DataExchange.srv" 
+  # 他にも .msg や .action ファイルがあればここに追加
 )
 
+# ★★★ ターゲットに生成されたメッセージ/サービスをリンク ★★★
 # カスタムインターフェースのタイプサポートを取得
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
@@ -144,7 +147,7 @@ target_link_libraries(service_lib ${cpp_typesupport_target})
 
 target_include_directories(service_lib PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>)
 
-# integration ライブラリ
+# integration ライブラリの定義
 add_library(integration_lib src/integration.cpp)
 target_link_libraries(integration_lib serial_lib)
 ament_target_dependencies(integration_lib rclcpp)
@@ -175,26 +178,36 @@ target_link_libraries(service_client_example ${cpp_typesupport_target})
 # target_include_directories(integration_explain PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>)
 # target_link_libraries(integration_explain ${cpp_typesupport_target})
 
+# ★★★ integration_pc1_example の実行ファイル定義 ★★★
 add_executable(integration_pc1_example src/integration_pc1_example.cpp)
-target_link_libraries(integration_pc1_example integration_lib serial_lib)
 ament_target_dependencies(integration_pc1_example rclcpp)
+target_link_libraries(integration_pc1_example 
+  integration_lib 
+  serial_lib
+  ${cpp_typesupport_target}
+)
 add_dependencies(integration_pc1_example my_cpp_pkg__cpp)
 target_include_directories(integration_pc1_example PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>)
-target_link_libraries(integration_pc1_example ${cpp_typesupport_target})
 
 add_executable(integration_pc2_example src/integration_pc2_example.cpp)
-target_link_libraries(integration_pc2_example integration_lib serial_lib)
 ament_target_dependencies(integration_pc2_example rclcpp)
+target_link_libraries(integration_pc2_example 
+  integration_lib 
+  serial_lib
+  ${cpp_typesupport_target}
+)
 add_dependencies(integration_pc2_example my_cpp_pkg__cpp)
 target_include_directories(integration_pc2_example PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>)
-target_link_libraries(integration_pc2_example ${cpp_typesupport_target})
 
 add_executable(integration_pc3_example src/integration_pc3_example.cpp)
-target_link_libraries(integration_pc3_example integration_lib serial_lib)
 ament_target_dependencies(integration_pc3_example rclcpp)
+target_link_libraries(integration_pc3_example 
+  integration_lib 
+  serial_lib
+  ${cpp_typesupport_target}
+)
 add_dependencies(integration_pc3_example my_cpp_pkg__cpp)
 target_include_directories(integration_pc3_example PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp>)
-target_link_libraries(integration_pc3_example ${cpp_typesupport_target})
 
 # add_executable(microcontroller_test src/microcontroller_test.cpp)
 # target_link_libraries(microcontroller_test integration_lib serial_lib)
@@ -241,11 +254,9 @@ install(TARGETS
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# ライブラリのエクスポート
-ament_export_targets(serial_lib_targets HAS_LIBRARY_TARGET)
-ament_export_targets(searchid_lib_targets HAS_LIBRARY_TARGET)
-ament_export_targets(topic_lib_targets HAS_LIBRARY_TARGET)
-ament_export_targets(integration_lib_targets HAS_LIBRARY_TARGET)
+# ライブラリのエクスポート設定を統合
+ament_export_targets(${PROJECT_NAME}_targets HAS_LIBRARY_TARGET)
+# ★★★ Pythonから利用可能にするためのエクスポート設定 ★★★
 ament_export_dependencies(
   rclcpp
   std_msgs
@@ -255,36 +266,14 @@ ament_export_dependencies(
   rosidl_default_runtime
 )
 
+# ライブラリのインストール設定を統合
 install(
-  TARGETS serial_lib
-  EXPORT serial_lib_targets
-  LIBRARY DESTINATION lib
-  ARCHIVE DESTINATION lib
-  RUNTIME DESTINATION bin
-  INCLUDES DESTINATION include
-)
-
-install(
-  TARGETS searchid_lib
-  EXPORT searchid_lib_targets
-  LIBRARY DESTINATION lib
-  ARCHIVE DESTINATION lib
-  RUNTIME DESTINATION bin
-  INCLUDES DESTINATION include
-)
-
-install(
-  TARGETS topic_lib
-  EXPORT topic_lib_targets
-  LIBRARY DESTINATION lib
-  ARCHIVE DESTINATION lib
-  RUNTIME DESTINATION bin
-  INCLUDES DESTINATION include
-)
-
-install(
-  TARGETS integration_lib
-  EXPORT integration_lib_targets
+  TARGETS 
+    serial_lib
+    searchid_lib
+    topic_lib
+    integration_lib
+  EXPORT ${PROJECT_NAME}_targets
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION bin

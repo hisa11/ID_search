@@ -49,6 +49,12 @@ public:
     // ポートの状態を取得
     bool isOpen() const;
 
+    // シリアル接続を再試行
+    bool reconnect();
+
+    // 接続チェック（実際に通信可能かテスト）
+    bool checkConnection();
+
     // シリアルバッファをフラッシュ
     void flushPort();
 
